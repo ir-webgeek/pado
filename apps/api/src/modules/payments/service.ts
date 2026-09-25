@@ -22,13 +22,15 @@ async function start(
   input: { shopId: string; purpose: "order" | "appointment" | "wallet_topup"; orderId?: string; appointmentId?: string; amount: number; method: PaymentMethod; description: string; mobile?: string },
 ): Promise<PaymentStart> {
   if (input.amount <= 0) return { kind: "paid" };
+  // commission applies to customer payments only (not the shop's own wallet top-ups)
+  const platformFee = input.purpose === "wallet_topup" ? 0 : Math.round((input.amount * env.PLATFORM_FEE_PERCENT) / 100);
   if (input.method === "card_to_card") {
     const shop = await db.query.shops.findFirst({ where: eq(shops.id, input.shopId) });
     const card = resolveShopSettings(shop!.settings).cardToCard;
     if (!card.cardNumber) throw badRequest("card_to_card_disabled", "this shop does not accept card-to-card payments");
     const [p] = await db
       .insert(payments)
-      .values({ shopId: input.shopId, purpose: input.purpose, orderId: input.orderId, appointmentId: input.appointmentId, provider: "card_to_card", method: "card_to_card", amount: input.amount })
+      .values({ shopId: input.shopId, purpose: input.purpose, orderId: input.orderId, appointmentId: input.appointmentId, provider: "card_to_card", method: "card_to_card", amount: input.amount, platformFee })
       .returning();
     return { kind: "card_to_card", paymentId: p!.id, amount: input.amount, card };
   }
@@ -37,13 +39,21 @@ async function start(
   const provider = activeProvider();
   const [p] = await db
     .insert(payments)
-    .values({ shopId: input.shopId, purpose: input.purpose, orderId: input.orderId, appointmentId: input.appointmentId, provider: provider.name, method: "gateway", amount: input.amount })
+    .values({ shopId: input.shopId, purpose: input.purpose, orderId: input.orderId, appointmentId: input.appointmentId, provider: provider.name, method: "gateway", amount: input.amount, platformFee })
     .returning();
+  const shop = await db.query.shops.findFirst({ where: eq(shops.id, input.shopId), columns: { settlementIban: true } });
   const { authority, redirectUrl } = await provider.request({
     amount: input.amount,
     description: input.description,
     callbackUrl: `${publicApiUrl()}/v1/pay/callback/${provider.name}?pid=${p!.id}`,
     mobile: input.mobile,
+    splits:
+      provider.supportsSplit && shop?.settlementIban && env.PLATFORM_IBAN && platformFee > 0
+        ? [
+            { iban: shop.settlementIban, amount: input.amount - platformFee, role: "merchant" },
+            { iban: env.PLATFORM_IBAN, amount: platformFee, role: "platform" },
+          ]
+        : undefined,
   });
   await db.update(payments).set({ authority }).where(eq(payments.id, p!.id));
   return { kind: "redirect", url: redirectUrl, paymentId: p!.id };

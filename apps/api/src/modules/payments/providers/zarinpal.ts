@@ -26,6 +26,7 @@ interface ZpResponse<D> {
 
 export const zarinpalProvider: PaymentProvider = {
   name: "zarinpal",
+  supportsSplit: false,
   async request(req) {
     if (!env.ZARINPAL_MERCHANT_ID) throw new Error("ZARINPAL_MERCHANT_ID is not set");
     const r = await post<ZpResponse<{ code: number; authority: string }>>("/pg/v4/payment/request.json", {

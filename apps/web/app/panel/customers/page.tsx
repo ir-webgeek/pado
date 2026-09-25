@@ -200,7 +200,7 @@ function CampaignModal({ initialSegment, onClose }: { initialSegment: string; on
       ) : (
         <div className="space-y-3">
           <div className="grid grid-cols-2 gap-3">
-            <Field label="Name">
+            <Field label={t("fm.name")}>
               <Input value={name} onChange={(e) => setName(e.target.value)} />
             </Field>
             <Field label={t("p.customers")}>
@@ -211,7 +211,7 @@ function CampaignModal({ initialSegment, onClose }: { initialSegment: string; on
               </Select>
             </Field>
           </div>
-          <Field label="SMS" hint={`${num(message.length, locale)}`}>
+          <Field label={t("c.sms")} hint={`${num(message.length, locale)}`}>
             <Textarea value={message} onChange={(e) => (setMessage(e.target.value), setPreview(null))} />
           </Field>
           {preview && (

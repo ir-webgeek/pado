@@ -12,7 +12,25 @@ export async function publicGet<T>(path: string, revalidate = 30): Promise<T | n
 }
 
 export interface PublicShop {
-  shop: { id: string; slug: string; name: string; kind: "retail" | "services" | "hybrid"; logo: string | null; brandColor: string; theme: string; timezone: string; instagram: string | null };
+  shop: {
+    id: string;
+    slug: string;
+    name: string;
+    kind: "retail" | "services" | "hybrid";
+    logo: string | null;
+    brandColor: string;
+    theme: string;
+    timezone: string;
+    instagram: string | null;
+    assistant: boolean;
+    landing: {
+      headline: string;
+      subheadline: string;
+      highlights: { title: string; text: string }[];
+      faq: { q: string; a: string }[];
+      featuredCategorySlugs: string[];
+    } | null;
+  };
   categories: { id: string; name: string; slug: string }[];
 }
 export interface PublicProduct {

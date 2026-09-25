@@ -11,6 +11,7 @@ import {
   slotQuerySchema,
   staffInputSchema,
   timeOffInputSchema,
+  walkInSchema,
   workingHoursSchema,
 } from "@shopino/shared";
 import type { Ctx } from "../../lib/context";
@@ -18,7 +19,7 @@ import { requireFeature, requireShop } from "../../lib/auth";
 import { audit } from "../../lib/audit";
 import { badRequest, notFound, paymentRequired } from "../../lib/errors";
 import { env } from "../../config";
-import { bookAppointment, calendar, getSlots, rescheduleAppointment, transitionAppointment } from "./service";
+import { bookAppointment, bookWalkIn, calendar, getSlots, rescheduleAppointment, transitionAppointment } from "./service";
 
 const params = z.object({ shopId: z.string().uuid() });
 const withId = params.extend({ id: z.string().uuid() });
@@ -171,6 +172,30 @@ export const appointmentRoutes =
       const appt = await bookAppointment(ctx.db, ctx.queues, req.shop.id, req.body, actorOf(req.user.sub), { byShop: true });
       return { ...appt, link: `${env.PUBLIC_WEB_URL}/b/booking/${appt.code}?t=${appt.accessToken}` };
     });
+
+    app.get("/:shopId/appointments/refunds", { preHandler: requireShop(ctx, "staff"), schema: { params } }, async (req) => {
+      const { appointments: rows } = await calendar(ctx.db, req.shop.id, new Date(), new Date(), undefined, { refundRequested: true });
+      return rows;
+    });
+
+    // offline: walk-ins and phone bookings at any time, bypassing online booking rules
+    app.post("/:shopId/appointments/walk-in", { preHandler: requireShop(ctx, "staff"), schema: { params, body: walkInSchema } }, async (req) =>
+      bookWalkIn(ctx.db, ctx.queues, req.shop.id, req.body, actorOf(req.user.sub)),
+    );
+
+    app.post(
+      "/:shopId/appointments/:id/refund",
+      { preHandler: requireShop(ctx, "admin"), schema: { params: withId, body: z.object({ status: z.enum(["refunded", "kept"]) }) } },
+      async (req) => {
+        const [row] = await ctx.db
+          .update(appointments)
+          .set({ refundStatus: req.body.status, ...(req.body.status === "refunded" ? { paymentStatus: "refunded" as const } : {}) })
+          .where(and(eq(appointments.id, req.params.id), eq(appointments.shopId, req.shop.id)))
+          .returning({ id: appointments.id });
+        if (!row) throw notFound("appointment");
+        return { ok: true };
+      },
+    );
 
     app.get("/:shopId/appointments/:id", { preHandler: requireShop(ctx), schema: { params: withId } }, async (req) => {
       const a = await ctx.db.query.appointments.findFirst({ where: and(eq(appointments.id, req.params.id), eq(appointments.shopId, req.shop.id)) });

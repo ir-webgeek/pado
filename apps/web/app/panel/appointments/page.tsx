@@ -1,10 +1,10 @@
 "use client";
 
 import clsx from "clsx";
-import { CalendarOff, ChevronLeft, ChevronRight, Plus } from "lucide-react";
+import { CalendarOff, ChevronLeft, ChevronRight, Plus, UserPlus } from "lucide-react";
 import { useMemo, useState } from "react";
 import { addDaysIso, weekdayOfIso, zonedIsoDate, zonedToUtc } from "@shopino/shared";
-import { Badge, Button, Card, ErrorNote, Field, Input, Modal, PageHeader, Select, Spinner, Tabs, Textarea, statusTone } from "@/components/ui";
+import { Badge, Button, Card, ErrorNote, Field, Input, Modal, PageHeader, Select, Spinner, Tabs, Textarea, Toggle, statusTone } from "@/components/ui";
 import { api, useApi } from "@/lib/api";
 import { dayLabel, latinDigits, money, num, time, weekdayShort } from "@/lib/format";
 import type { DictKey } from "@/lib/i18n";
@@ -29,6 +29,7 @@ export default function AppointmentsPage() {
   const [selected, setSelected] = useState<Appointment | null>(null);
   const [creating, setCreating] = useState<{ staffId?: string; startsAt?: string } | null>(null);
   const [timeOffOpen, setTimeOffOpen] = useState(false);
+  const [walkIn, setWalkIn] = useState(false);
 
   const days = view === "day" ? 1 : 7;
   // week view starts on Saturday (Iranian week)
@@ -43,6 +44,7 @@ export default function AppointmentsPage() {
     { refreshInterval: 30_000 },
   );
 
+  const { data: refunds, mutate: reloadRefunds } = useApi<Appointment[]>(`/shops/${shop.id}/appointments/refunds`);
   const activeStaff = (staff ?? []).filter((s) => s.active);
   const shift = (n: number) => setDate((d) => addDaysIso(d, n * days));
 
@@ -53,6 +55,9 @@ export default function AppointmentsPage() {
         subtitle={view === "day" ? dayLabel(date, locale) : `${dayLabel(start, locale)} - ${dayLabel(addDaysIso(start, 6), locale)}`}
         actions={
           <>
+            <Button onClick={() => setWalkIn(true)}>
+              <UserPlus className="size-4" /> {t("ap.walkIn")}
+            </Button>
             <Button onClick={() => setTimeOffOpen(true)}>
               <CalendarOff className="size-4" /> {t("ap.timeOff")}
             </Button>
@@ -78,6 +83,19 @@ export default function AppointmentsPage() {
         <input type="date" className="input !w-auto !py-1.5 text-sm" value={date} onChange={(e) => e.target.value && setDate(e.target.value)} />
       </div>
 
+      {refunds && refunds.length > 0 && (
+        <Card className="mb-4 space-y-2 border-warning/40 !p-3">
+          <p className="text-sm font-semibold text-warning">
+            {t("ap.refund")} ({num(refunds.length, locale)})
+          </p>
+          {refunds.map((r) => (
+            <button key={r.id} onClick={() => setSelected(r)} className="flex w-full items-center justify-between gap-2 rounded-xl bg-[var(--surface-sunken)] px-3 py-2 text-start text-sm">
+              <span className="strong">{r.customer.name} · {r.service.name}</span>
+              <span className="num muted">{money(r.paidAmount, locale)}</span>
+            </button>
+          ))}
+        </Card>
+      )}
       {!cal || !staff ? (
         <Spinner />
       ) : view === "day" ? (
@@ -102,6 +120,7 @@ export default function AppointmentsPage() {
           onChanged={() => {
             setSelected(null);
             mutate();
+            reloadRefunds();
           }}
         />
       )}
@@ -117,6 +136,9 @@ export default function AppointmentsPage() {
             mutate();
           }}
         />
+      )}
+      {walkIn && services && (
+        <WalkInModal services={services.filter((s) => s.active)} staff={activeStaff} tz={tz} onClose={() => setWalkIn(false)} onBooked={() => (setWalkIn(false), mutate())} />
       )}
       {timeOffOpen && <TimeOffModal staff={activeStaff} tz={tz} date={date} onClose={() => setTimeOffOpen(false)} onSaved={() => (setTimeOffOpen(false), mutate())} />}
     </div>
@@ -306,7 +328,10 @@ function AppointmentModal({ appt, tz, onClose, onChanged }: { appt: Appointment;
         <div className="flex flex-wrap gap-2">
           <Badge tone={statusTone(appt.status)}>{t(`st.${appt.status}` as DictKey)}</Badge>
           <Badge tone={statusTone(appt.paymentStatus)}>{t(`pay.${appt.paymentStatus}` as DictKey)}</Badge>
-          <Badge>{t(`ch.${appt.channel}` as DictKey)}</Badge>
+          <Badge tone={["pos", "phone"].includes(appt.channel) ? "neutral" : "info"}>
+            {["pos", "phone"].includes(appt.channel) ? t("ap.offline") : t("ap.online")} · {t(`ch.${appt.channel}` as DictKey)}
+          </Badge>
+          {appt.refundStatus && <Badge tone={appt.refundStatus === "requested" ? "warning" : "neutral"}>{t("ap.refund")}: {appt.refundStatus}</Badge>}
           <Badge tone={statusTone(appt.customer.segment)}>{t(`seg.${appt.customer.segment}` as DictKey)}</Badge>
           {appt.customer.noShowCount > 0 && <Badge tone="danger">{num(appt.customer.noShowCount, locale)} {t("c.noShows")}</Badge>}
         </div>
@@ -346,6 +371,26 @@ function AppointmentModal({ appt, tz, onClose, onChanged }: { appt: Appointment;
           />
         </Field>
         <ErrorNote error={error} />
+        {appt.refundStatus === "requested" && (
+          <div className="flex flex-wrap items-center gap-2 rounded-xl bg-warning/10 p-3 text-sm">
+            <span className="flex-1 text-warning">
+              {t("ap.refund")} · {money(appt.paidAmount, locale)}
+            </span>
+            {(["refunded", "kept"] as const).map((st) => (
+              <Button
+                key={st}
+                size="sm"
+                variant={st === "refunded" ? "primary" : "secondary"}
+                onClick={async () => {
+                  await api(`/shops/${shop.id}/appointments/${appt.id}/refund`, { method: "POST", json: { status: st } });
+                  onChanged();
+                }}
+              >
+                {t(st === "refunded" ? "ap.refunded" : "ap.kept")}
+              </Button>
+            ))}
+          </div>
+        )}
         <div className="flex flex-wrap gap-2">
           {(APPT_ACTIONS[appt.status] ?? []).map((a) => (
             <Button key={a.to} variant={a.variant ?? "secondary"} loading={busy} onClick={() => act(a.to)}>
@@ -527,6 +572,83 @@ function TimeOffModal({ staff, tz, date, onClose, onSaved }: { staff: Staff[]; t
         <div className="flex justify-end gap-2">
           <Button onClick={onClose}>{t("a.cancel")}</Button>
           <Button variant="primary" onClick={save}>{t("a.save")}</Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function WalkInModal({ services, staff, tz, onClose, onBooked }: { services: Service[]; staff: Staff[]; tz: string; onClose: () => void; onBooked: () => void }) {
+  const { t } = useI18n();
+  const { shop } = useShop();
+  const [serviceId, setServiceId] = useState(services[0]?.id ?? "");
+  const service = services.find((s) => s.id === serviceId);
+  const eligible = staff.filter((s) => service?.staffIds.includes(s.id));
+  const [staffId, setStaffId] = useState(eligible[0]?.id ?? "");
+  const [now, setNow] = useState(true);
+  const [day, setDay] = useState(zonedIsoDate(new Date(), tz));
+  const [at, setAt] = useState("12:00");
+  const [outsideHours, setOutsideHours] = useState(false);
+  const [name, setName] = useState("");
+  const [phone, setPhone] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<unknown>(null);
+  async function save() {
+    setBusy(true);
+    setError(null);
+    try {
+      const startsAt = now ? undefined : zonedToUtc(day, Number(at.slice(0, 2)) * 60 + Number(at.slice(3, 5)), tz).toISOString();
+      await api(`/shops/${shop.id}/appointments/walk-in`, {
+        method: "POST",
+        json: { serviceId, staffId: staffId || eligible[0]?.id, startsAt, outsideHours, customer: { name, phone: latinDigits(phone) } },
+      });
+      onBooked();
+    } catch (e) {
+      setError(e);
+      setBusy(false);
+    }
+  }
+  return (
+    <Modal open onClose={onClose} title={t("ap.walkIn")}>
+      <div className="space-y-3">
+        <div className="grid grid-cols-2 gap-3">
+          <Field label={t("ap.service")}>
+            <Select value={serviceId} onChange={(e) => setServiceId(e.target.value)}>
+              {services.map((s) => (
+                <option key={s.id} value={s.id}>{s.name}</option>
+              ))}
+            </Select>
+          </Field>
+          <Field label={t("ap.staff")}>
+            <Select value={staffId} onChange={(e) => setStaffId(e.target.value)}>
+              {eligible.map((s) => (
+                <option key={s.id} value={s.id}>{s.name}</option>
+              ))}
+            </Select>
+          </Field>
+        </div>
+        <Toggle checked={now} onChange={setNow} label={t("ap.now")} />
+        {!now && (
+          <div className="grid grid-cols-2 gap-3">
+            <Input type="date" value={day} onChange={(e) => setDay(e.target.value)} />
+            <Input type="time" value={at} onChange={(e) => setAt(e.target.value)} />
+          </div>
+        )}
+        <Toggle checked={outsideHours} onChange={setOutsideHours} label={t("ap.outsideHours")} />
+        <div className="grid grid-cols-2 gap-3">
+          <Field label={t("ap.customerName")}>
+            <Input value={name} onChange={(e) => setName(e.target.value)} />
+          </Field>
+          <Field label={t("ap.customerPhone")}>
+            <Input dir="ltr" inputMode="tel" value={phone} onChange={(e) => setPhone(e.target.value)} />
+          </Field>
+        </div>
+        <ErrorNote error={error} />
+        <div className="flex justify-end gap-2">
+          <Button onClick={onClose}>{t("a.cancel")}</Button>
+          <Button variant="primary" loading={busy} disabled={name.length < 2 || phone.length < 10 || !serviceId} onClick={save}>
+            {t("a.save")}
+          </Button>
         </div>
       </div>
     </Modal>

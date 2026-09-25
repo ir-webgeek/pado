@@ -1,5 +1,6 @@
 import { and, eq, gt, isNotNull } from "drizzle-orm";
-import { appointments, campaigns, customers, orders, payments, services, shops, staff, type Database } from "@shopino/db";
+import { appointments, campaigns, conversations, customers, messages, orders, payments, services, shops, staff, type Database } from "@shopino/db";
+import { sendText } from "../instagram/client";
 import { formatJalali, formatToman } from "@shopino/shared";
 import { env } from "../../config";
 import { segmentWhere } from "../campaigns/routes";
@@ -100,8 +101,24 @@ export async function sendAppointmentReminder(db: Database, appointmentId: strin
   // a rescheduled booking leaves stale jobs behind: only send when this job still matches the start time
   const due = c.a.startsAt.getTime() - offsetMin * 60_000;
   if (Math.abs(Date.now() - due) > 15 * 60_000) return;
+  const text = `یادآوری ${c.shop.name}: نوبت ${c.svc.name} با ${c.st.name}، ${timeFa(c.a.startsAt, c.shop.timezone)}. تغییر یا لغو: ${c.link}`;
+  // Instagram DM is free but only allowed within 24h of the customer's last message; otherwise SMS
+  if (c.customer.instagramId && c.shop.igUserId && c.shop.igAccessToken) {
+    const conv = await db.query.conversations.findFirst({
+      where: and(eq(conversations.shopId, c.shop.id), eq(conversations.channel, "instagram"), eq(conversations.externalUserId, c.customer.instagramId)),
+    });
+    if (conv?.lastInboundAt && Date.now() - conv.lastInboundAt.getTime() < 23 * 3600_000) {
+      try {
+        await sendText({ igUserId: c.shop.igUserId, accessToken: c.shop.igAccessToken }, c.customer.instagramId, text);
+        await db.insert(messages).values({ shopId: c.shop.id, conversationId: conv.id, direction: "out", sender: "system", text });
+        return;
+      } catch {
+        // fall through to SMS
+      }
+    }
+  }
   if (!c.customer.phone || c.customer.smsOptOut) return;
-  await sendSms(c.customer.phone, `یادآوری ${c.shop.name}: نوبت ${c.svc.name} با ${c.st.name}، ${timeFa(c.a.startsAt, c.shop.timezone)}. تغییر یا لغو: ${c.link}`);
+  await sendSms(c.customer.phone, text);
 }
 
 /** Sends in batches, charging the wallet per batch so a campaign stops cleanly when credit runs out. */

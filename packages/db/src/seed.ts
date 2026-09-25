@@ -1,4 +1,5 @@
 import { config } from "dotenv";
+import { eq } from "drizzle-orm";
 import { randomBytes } from "node:crypto";
 import { addDaysIso, bookingCode, orderCode, zonedIsoDate, zonedToUtc } from "@shopino/shared";
 import { createDb } from "./index";
@@ -29,6 +30,7 @@ async function main() {
       kind: "hybrid",
       ownerId: owner!.id,
       plan: "pro",
+      landing: null,
       planExpiresAt: new Date(Date.now() + 30 * 86400_000),
       walletBalance: 300_000,
       settings: { agent: { enabled: true }, cardToCard: { cardNumber: "6037991234567890", holder: "رها کریمی", bank: "ملی" } },
@@ -240,7 +242,44 @@ async function main() {
     mk(-1, 900, 2, mina.id, 0, "completed"),
   ]);
 
-  await db.insert(s.commentRules).values({ shopId, keywords: ["قیمت", "price", "چند"], replyText: "سلام! قیمت و موجودی رو براتون دایرکت کردم 🌿", publicReply: "دایرکت رو چک کنید 💌" });
+  // ---------- static automations + a form
+  const [form] = await db
+    .insert(s.forms)
+    .values({
+      shopId,
+      title: "درخواست مشاوره رنگ مو",
+      description: "چند سوال کوتاه تا بهترین رنگ رو برات پیشنهاد بدیم.",
+      fields: [
+        { key: "name", label: "نام", type: "text", required: true },
+        { key: "phone", label: "موبایل", type: "phone", required: true },
+        { key: "hair", label: "رنگ فعلی مو", type: "select", required: false, options: ["طبیعی", "رنگ‌شده", "دکلره"] },
+        { key: "note", label: "توضیحات", type: "textarea", required: false },
+      ],
+      successMessage: "ممنون! به‌زودی باهاتون تماس می‌گیریم 🌿",
+    })
+    .returning();
+  await db.insert(s.automationRules).values([
+    {
+      shopId,
+      name: "قیمت زیر پست",
+      trigger: "comment",
+      keywords: ["قیمت", "price", "چند"],
+      publicReply: "دایرکت رو چک کنید 💌",
+      privateReply: "سلام! قیمت و موجودی رو این‌جا ببین: http://localhost:3000/s/atelier-raha",
+      messages: [{ kind: "buttons", text: "برای خرید یا رزرو نوبت:", buttons: [{ title: "فروشگاه", url: "http://localhost:3000/s/atelier-raha" }, { title: "رزرو نوبت", url: "http://localhost:3000/b/atelier-raha" }] }],
+    },
+    { shopId, name: "پاسخ به استوری", trigger: "story_reply", matchMode: "any", messages: [{ kind: "text", text: "مرسی که استوری رو دیدی 😍 سوالی داری بپرس!" }], thenMode: "agent" },
+    { shopId, name: "منشن در استوری", trigger: "story_mention", matchMode: "any", messages: [{ kind: "text", text: "ممنون از منشن 🙏 یه کد تخفیف برات داریم: WELCOME10" }] },
+    { shopId, name: "مشاوره رنگ", trigger: "dm_keyword", keywords: ["مشاوره", "رنگ"], messages: [{ kind: "form", formId: form!.id, text: "برای مشاوره رنگ این فرم کوتاه رو پر کن:" }] },
+    { shopId, name: "خوش‌آمد", trigger: "first_message", matchMode: "any", messages: [{ kind: "text", text: "سلام! به آتلیه رها خوش اومدی 🌙" }], thenMode: "agent", priority: 0 },
+  ]);
+  await db.insert(s.knowledgeEntries).values([
+    { shopId, source: "faq", title: "ارسال", content: "ارسال تهران با پیک در همان روز و شهرستان با پست پیشتاز ۲ تا ۴ روز کاری. خرید بالای ۱۰ میلیون ارسال رایگان." },
+    { shopId, source: "faq", title: "مرجوعی", content: "تا ۷ روز پس از تحویل در صورت سالم بودن برچسب، امکان تعویض یا مرجوعی هست. هزینه ارسال برگشت با مشتری است." },
+    { shopId, source: "faq", title: "لغو نوبت", content: "لغو یا جابه‌جایی نوبت تا ۳ ساعت قبل از طریق لینک نوبت یا صفحه نوبت‌های من ممکن است. بیعانه رنگ مو در صورت لغو دیرتر برگشت داده نمی‌شود." },
+    { shopId, source: "manual", title: "راهنمای سایز کت", content: "کت‌های کتان قالب استاندارد دارند؛ سایز ۳۶ برای قد ۱۶۰-۱۶۵، سایز ۳۸ برای ۱۶۵-۱۷۰ و سایز ۴۰ برای ۱۷۰ به بالا مناسب است." },
+  ]);
+  await db.update(s.users).set({ isSuperAdmin: true }).where(eq(s.users.id, owner!.id));
 
   console.log(`seeded shop atelier-raha (${shopId}); login phone: 09120000000`);
 }

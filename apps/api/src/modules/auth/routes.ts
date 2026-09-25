@@ -4,13 +4,13 @@ import { and, eq, gt, isNull } from "drizzle-orm";
 import { sessions, shopMembers, shops, users } from "@shopino/db";
 import { normalizeIranPhone, requestOtpSchema, verifyOtpSchema } from "@shopino/shared";
 import { env, isProd } from "../../config";
+import { requestOtp, verifyOtp } from "../../lib/otp";
 import type { Ctx } from "../../lib/context";
-import { otpCode, randomToken, safeEqual, sha256 } from "../../lib/crypto";
-import { AppError, badRequest, unauthorized } from "../../lib/errors";
+import { randomToken, sha256 } from "../../lib/crypto";
+import { unauthorized } from "../../lib/errors";
 import { authenticate } from "../../lib/auth";
-import { sendSms } from "../notifications/sms";
 
-const OTP_TTL_S = 120;
+const superAdminPhones = () => new Set(env.SUPER_ADMIN_PHONES.split(",").map((p) => normalizeIranPhone(p.trim())).filter(Boolean) as string[]);
 const REFRESH_TTL_DAYS = 30;
 
 export const authRoutes =
@@ -38,18 +38,8 @@ export const authRoutes =
       "/otp",
       { schema: { body: requestOtpSchema }, config: { rateLimit: { max: 5, timeWindow: "10 minutes" } } },
       async (req) => {
-        const phone = normalizeIranPhone(req.body.phone);
-        if (!phone) throw badRequest("invalid_phone", "enter a valid mobile number");
-        const throttleKey = `otp:throttle:${phone}`;
-        const sent = await ctx.redis.incr(throttleKey);
-        if (sent === 1) await ctx.redis.expire(throttleKey, 600);
-        if (sent > 5) throw new AppError(429, "too_many_requests", "too many codes requested, try again later");
-
-        const code = otpCode();
-        await ctx.redis.set(`otp:${phone}`, JSON.stringify({ h: sha256(code), tries: 0 }), "EX", OTP_TTL_S);
-        await sendSms(phone, `کد ورود شاپینو: ${code}`);
-        if (env.OTP_DEV_ECHO && !isProd) req.log.warn({ phone, code }, "OTP (dev echo)");
-        return { ok: true, ttl: OTP_TTL_S, ...(env.OTP_DEV_ECHO && !isProd ? { devCode: code } : {}) };
+        const r = await requestOtp(ctx.redis, req.body.phone, "staff", "کد ورود شاپینو");
+        return { ok: true, ttl: r.ttl, ...(r.devCode ? { devCode: r.devCode } : {}) };
       },
     );
 
@@ -57,29 +47,14 @@ export const authRoutes =
       "/verify",
       { schema: { body: verifyOtpSchema }, config: { rateLimit: { max: 10, timeWindow: "10 minutes" } } },
       async (req, reply) => {
-        const phone = normalizeIranPhone(req.body.phone);
-        if (!phone) throw badRequest("invalid_phone");
-        const key = `otp:${phone}`;
-        const raw = await ctx.redis.get(key);
-        if (!raw) throw badRequest("otp_expired", "code expired, request a new one");
-        const state = JSON.parse(raw) as { h: string; tries: number };
-        if (state.tries >= 5) {
-          await ctx.redis.del(key);
-          throw badRequest("otp_locked", "too many wrong attempts");
-        }
-        if (!safeEqual(state.h, sha256(req.body.code))) {
-          await ctx.redis.set(key, JSON.stringify({ ...state, tries: state.tries + 1 }), "KEEPTTL");
-          throw badRequest("otp_invalid", "wrong code");
-        }
-        await ctx.redis.del(key);
-
+        const phone = await verifyOtp(ctx.redis, req.body.phone, req.body.code, "staff");
         const [user] = await ctx.db
           .insert(users)
-          .values({ phone })
-          .onConflictDoUpdate({ target: users.phone, set: { phone } })
+          .values({ phone, isSuperAdmin: superAdminPhones().has(phone) })
+          .onConflictDoUpdate({ target: users.phone, set: { phone, ...(superAdminPhones().has(phone) ? { isSuperAdmin: true } : {}) } })
           .returning();
         const tokens = await issueSession(reply, user!.id, req.headers["user-agent"]);
-        return { user: { id: user!.id, phone: user!.phone, name: user!.name }, ...tokens };
+        return { user: { id: user!.id, phone: user!.phone, name: user!.name, isSuperAdmin: user!.isSuperAdmin }, ...tokens };
       },
     );
 
@@ -110,6 +85,6 @@ export const authRoutes =
         .from(shopMembers)
         .innerJoin(shops, eq(shops.id, shopMembers.shopId))
         .where(eq(shopMembers.userId, user.id));
-      return { user: { id: user.id, phone: user.phone, name: user.name }, shops: memberships };
+      return { user: { id: user.id, phone: user.phone, name: user.name, isSuperAdmin: user.isSuperAdmin }, shops: memberships };
     });
   };

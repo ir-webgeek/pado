@@ -2,7 +2,9 @@
 
 import clsx from "clsx";
 import { ArrowLeft, ArrowRight, Check, Clock, Users } from "lucide-react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { Assistant } from "@/components/store/assistant";
 import { use, useMemo, useState } from "react";
 import { addDaysIso, zonedIsoDate } from "@shopino/shared";
 import { Avatar, Button, ErrorNote, Field, Input, Spinner } from "@/components/ui";
@@ -13,7 +15,7 @@ import { useI18n } from "@/lib/locale-client";
 import type { DaySlots } from "@/lib/types";
 
 interface ShopResp {
-  shop: { name: string; brandColor: string; timezone: string; kind: string };
+  shop: { name: string; brandColor: string; timezone: string; kind: string; assistant: boolean };
 }
 interface ServicesResp {
   services: { id: string; name: string; description: string; durationMin: number; price: number; priceFrom: boolean; deposit: { type: string; value: number }; capacity: number; color: string; staffIds: string[] }[];
@@ -68,7 +70,10 @@ export default function BookingWizard({ params }: { params: Promise<{ slug: stri
       <header className="border-b border-[var(--border)] bg-[var(--bg-elev)]">
         <div className="mx-auto flex h-14 max-w-2xl items-center justify-between px-4">
           <span className="font-bold strong">{shop?.shop.name}</span>
-          <LangToggle />
+          <span className="flex items-center gap-1">
+            <Link href="/me" className="rounded-full px-3 py-2 text-xs muted">{t("p.myBookings")}</Link>
+            <LangToggle />
+          </span>
         </div>
       </header>
       <main className="mx-auto max-w-2xl px-4 py-6">
@@ -186,6 +191,7 @@ export default function BookingWizard({ params }: { params: Promise<{ slug: stri
           </div>
         )}
       </main>
+      {shop?.shop.assistant && <Assistant slug={slug} serviceId={serviceId ?? undefined} mode="booking" />}
     </div>
   );
 }

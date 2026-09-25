@@ -18,6 +18,16 @@ const envSchema = z.object({
   JWT_SECRET: z.string().min(32),
   COOKIE_SECRET: z.string().min(32),
   OTP_DEV_ECHO: bool.default(false),
+  /** comma separated mobiles that become platform super admins on login */
+  SUPER_ADMIN_PHONES: z.string().default(""),
+  /** platform commission on customer payments, recorded per payment (split settlement once a shared gateway is live) */
+  PLATFORM_FEE_PERCENT: z.coerce.number().min(0).max(20).default(1),
+  /** platform Sheba for the commission leg of split payments */
+  PLATFORM_IBAN: z.string().optional(),
+  /** optional USD->Toman rate source: JSON endpoint + dot path + multiplier (e.g. 0.1 when the source is in Rial) */
+  USD_RATE_URL: z.string().url().optional(),
+  USD_RATE_JSON_PATH: z.string().default("usd"),
+  USD_RATE_MULTIPLIER: z.coerce.number().default(1),
 
   ANTHROPIC_API_KEY: z.string().optional(),
   AGENT_MODEL: z.string().default("claude-opus-5"),
@@ -31,7 +41,7 @@ const envSchema = z.object({
 
   TELEGRAM_BOT_TOKEN: z.string().optional(),
 
-  PAYMENT_PROVIDER: z.enum(["mock", "zarinpal"]).default("mock"),
+  PAYMENT_PROVIDER: z.enum(["mock", "zarinpal", "pasargad"]).default("mock"),
   ZARINPAL_MERCHANT_ID: z.string().optional(),
   ZARINPAL_SANDBOX: bool.default(true),
 

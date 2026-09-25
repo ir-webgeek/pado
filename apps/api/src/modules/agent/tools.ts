@@ -9,6 +9,7 @@ import type { Queues } from "../../lib/queues";
 import { bookAppointment, getSlots } from "../appointments/service";
 import { variantLabel } from "../catalog/service";
 import { createOrder } from "../orders/service";
+import { searchKnowledge } from "../knowledge/search";
 
 export interface AgentToolContext {
   db: Database;
@@ -20,6 +21,8 @@ export interface AgentToolContext {
   channel: "instagram" | "telegram" | "web" | "agent";
   /** set when a tool decides a human must take over */
   handoff?: string;
+  /** every tool call of this run, for the admin log */
+  toolLog: { name: string; ok: boolean }[];
 }
 
 interface ToolDef<S extends z.ZodType> {
@@ -261,6 +264,20 @@ const bookTool = def({
   },
 });
 
+const knowledgeTool = def({
+  tool: {
+    name: "search_knowledge",
+    description:
+      "Search the shop's own knowledge base (policies, shipping, returns, sizing, care instructions, FAQs and answers the team gave before). Use it for any question that is not about live price/stock/free times.",
+    input_schema: { type: "object", properties: { query: { type: "string" } }, required: ["query"] },
+  },
+  input: z.object({ query: z.string().min(1).max(300) }),
+  async run(ctx, { query }) {
+    const rows = await searchKnowledge(ctx.db, ctx.shopId, query, 5);
+    return { results: rows.map((r) => ({ title: r.title, content: r.content })) };
+  },
+});
+
 const todayTool = def({
   tool: {
     name: "today",
@@ -293,7 +310,7 @@ const handoff = def({
   },
 });
 
-export const AGENT_TOOLS = [searchProducts, createOrderTool, orderStatus, listServices, findSlots, bookTool, todayTool, handoff] as ToolDef<z.ZodType>[];
+export const AGENT_TOOLS = [searchProducts, createOrderTool, orderStatus, listServices, findSlots, bookTool, knowledgeTool, todayTool, handoff] as ToolDef<z.ZodType>[];
 
 /** Retail-only shops don't need booking tools and vice versa - fewer tools = better tool choice. */
 export function toolsFor(kind: "retail" | "services" | "hybrid") {
@@ -306,10 +323,16 @@ export async function runTool(ctx: AgentToolContext, name: string, rawInput: unk
   const t = AGENT_TOOLS.find((x) => x.tool.name === name);
   if (!t) return { content: `unknown tool ${name}`, isError: true };
   const parsed = t.input.safeParse(rawInput);
-  if (!parsed.success) return { content: `invalid input: ${z.prettifyError(parsed.error)}`, isError: true };
+  if (!parsed.success) {
+    ctx.toolLog.push({ name, ok: false });
+    return { content: `invalid input: ${z.prettifyError(parsed.error)}`, isError: true };
+  }
   try {
-    return { content: JSON.stringify(await t.run(ctx, parsed.data)), isError: false };
+    const content = JSON.stringify(await t.run(ctx, parsed.data));
+    ctx.toolLog.push({ name, ok: true });
+    return { content, isError: false };
   } catch (err) {
+    ctx.toolLog.push({ name, ok: false });
     // business errors (out of stock, slot taken) are useful to the model; hide internals
     if (err instanceof AppError) return { content: JSON.stringify({ error: err.code, message: err.message }), isError: true };
     throw err;

@@ -22,9 +22,15 @@ const featureLabels: Partial<Record<PlanFeature, { fa: string; en: string }>> = 
   pos: { fa: "صندوق فروش حضوری", en: "In-store POS" },
   seo_ai: { fa: "سئوی هوشمند", en: "AI SEO" },
   priority_support: { fa: "پشتیبانی اولویت‌دار", en: "Priority support" },
+  automations: { fa: "پاسخ خودکار کامنت، استوری و دایرکت", en: "Comment, story & DM auto-replies" },
+  forms: { fa: "فرم‌ساز و ارسال فرم در دایرکت", en: "Form builder, forms in DMs" },
+  ai_consult: { fa: "مشاور هوشمند در سایت و صفحه رزرو", en: "AI consultant on store & booking pages" },
+  knowledge: { fa: "پایگاه دانش و یادگیری از دایرکت‌ها", en: "Knowledge base, learns from past DMs" },
+  ig_import: { fa: "ساخت محصول از پست‌های اینستاگرام", en: "Products from Instagram posts" },
 };
 
 const names = {
+  free: { fa: "رایگان", en: "Free" },
   starter: { fa: "استارتر", en: "Starter" },
   lite: { fa: "لایت", en: "Lite" },
   pro: { fa: "پرو", en: "Pro" },
@@ -54,11 +60,12 @@ export function PricingCards() {
           ))}
         </div>
       </div>
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+      <div className="grid gap-4 md:grid-cols-3 xl:grid-cols-6">
         {PLAN_IDS.map((id) => {
           const p = PLANS[id];
           const price = yearly ? p.yearlyPerMonth : p.monthly;
-          const prev = id === "starter" ? [] : PLANS[PLAN_IDS[PLAN_IDS.indexOf(id) - 1]!].features;
+          const idx = PLAN_IDS.indexOf(id);
+          const prev = idx === 0 ? [] : PLANS[PLAN_IDS[idx - 1]!].features;
           const extra = p.features.filter((f) => !prev.includes(f) && featureLabels[f]);
           return (
             <div key={id} className={clsx("card relative flex flex-col p-5", p.recommended && "border-gold/50 shadow-[0_0_0_1px_rgb(217_208_184/.3),0_24px_60px_-24px_rgb(217_208_184/.35)]")}>
@@ -67,6 +74,8 @@ export function PricingCards() {
               <div className="mt-3 min-h-16">
                 {price === null ? (
                   <p className="text-2xl font-bold strong">{t("pricing.custom")}</p>
+                ) : price === 0 ? (
+                  <p className="text-3xl font-extrabold strong">{names.free[locale]}</p>
                 ) : (
                   <p>
                     <span className="num text-3xl font-extrabold strong">{fmt(price / 1000)}</span>

@@ -17,9 +17,12 @@ import {
   sendCampaign,
 } from "./modules/notifications/notify";
 import { expireOrderIfDue } from "./modules/orders/service";
+import { refreshUsdRateFromSource } from "./modules/pricing/service";
+import { analyzeMedia } from "./modules/instagram/importer";
 
 const { db, client } = createDb(env.DATABASE_URL, { max: 10 });
 const connection = createRedis({ forWorker: true });
+const redis = createRedis();
 const queues = new Queues(connection);
 
 async function recomputeSegments(shopId?: string) {
@@ -57,8 +60,11 @@ const handlers: Handlers = {
   "notify.appointment-booked": ({ appointmentId }) => notifyAppointmentBooked(db, appointmentId),
   "notify.appointment-cancelled": ({ appointmentId }) => notifyAppointmentCancelled(db, appointmentId),
   "campaign.send": ({ campaignId }) => sendCampaign(db, campaignId),
-  "ig.message": (d) => handleInbound(db, queues, { shopId: d.shopId, channel: "instagram", externalUserId: d.igsid, text: d.text, externalId: d.mid, attachments: d.attachments }),
-  "ig.comment": (d) => handleComment(db, d),
+  "ig.message": (d) =>
+    handleInbound(db, queues, redis, { shopId: d.shopId, channel: "instagram", externalUserId: d.igsid, text: d.text, externalId: d.mid, attachments: d.attachments, storyReplyId: d.storyReplyId }),
+  "ig.comment": (d) => handleComment(db, redis, d),
+  "pricing.refresh-usd": () => refreshUsdRateFromSource(db),
+  "instagram.analyze": ({ shopId, mediaRowIds }) => analyzeMedia(db, shopId, mediaRowIds),
 };
 
 const process = (job: Job) => {
@@ -84,11 +90,16 @@ await queues.queues.scheduled.upsertJobScheduler(
   { name: "customers.recompute-segments", data: {} },
 );
 
+if (env.USD_RATE_URL) {
+  await queues.queues.scheduled.upsertJobScheduler("usd-rate", { every: 60 * 60_000 }, { name: "pricing.refresh-usd", data: {} });
+}
+
 console.log("worker started");
 
 const shutdown = async () => {
   await Promise.all(workers.map((w) => w.close()));
   await queues.close();
+  redis.disconnect();
   await client.end({ timeout: 5 });
   globalThis.process.exit(0);
 };

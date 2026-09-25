@@ -7,6 +7,7 @@ export class ApiError extends Error {
     public status: number,
     public code: string,
     message: string,
+    public details?: unknown,
   ) {
     super(message);
   }
@@ -34,7 +35,7 @@ export async function api<T = unknown>(path: string, init: RequestInit & { json?
     if (typeof window !== "undefined" && window.location.pathname.startsWith("/panel")) window.location.href = "/login";
   }
   const data = res.status === 204 ? null : await res.json().catch(() => null);
-  if (!res.ok) throw new ApiError(res.status, data?.error ?? "error", data?.message ?? res.statusText);
+  if (!res.ok) throw new ApiError(res.status, data?.error ?? "error", data?.message ?? res.statusText, data?.details);
   return data as T;
 }
 

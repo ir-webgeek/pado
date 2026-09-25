@@ -32,7 +32,7 @@ export async function buildApp(ctx: Ctx) {
   await app.register(cookie, { secret: env.COOKIE_SECRET });
   await app.register(jwt, { secret: env.JWT_SECRET, cookie: { cookieName: "access", signed: false }, sign: { expiresIn: "15m" } });
   await app.register(rateLimit, { global: true, max: 300, timeWindow: "1 minute", redis: ctx.redis, nameSpace: "rl:" });
-  await app.register(multipart, { limits: { fileSize: 8 * 1024 * 1024, files: 1 } });
+  await app.register(multipart, { limits: { fileSize: 25 * 1024 * 1024, files: 1 } });
 
   const uploadDir = resolve(env.UPLOAD_DIR);
   mkdirSync(uploadDir, { recursive: true });

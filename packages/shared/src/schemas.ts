@@ -54,11 +54,18 @@ export const updateShopSettingsSchema = z.object({
       rules: z.string().max(4000),
       neverOfferDiscount: z.boolean(),
       knowledge: z.string().max(20000),
+      consultOnWeb: z.boolean(),
+      learnedStyle: z.string().max(6000),
     })
     .partial()
     .optional(),
   cardToCard: z.object({ cardNumber: z.string().max(19), holder: z.string().max(80), bank: z.string().max(40) }).partial().optional(),
+  pricing: z
+    .object({ usdEnabled: z.boolean(), markupPercent: z.number().min(0).max(500), roundTo: z.number().int().min(1).max(1_000_000), autoFetch: z.boolean() })
+    .partial()
+    .optional(),
   telegramChatId: z.string().max(40).optional(),
+  settlementIban: z.string().regex(/^IR\d{24}$/, "Sheba must look like IR + 24 digits").optional(),
 });
 
 // ---------- catalog ----------
@@ -68,6 +75,7 @@ export const variantInputSchema = z.object({
   attributes: z.record(z.string(), z.string()).default({}),
   price: z.number().int().min(0),
   compareAtPrice: z.number().int().min(0).nullable().optional(),
+  priceUsdCents: z.number().int().min(1).nullable().optional(),
   stock: z.number().int().min(0).default(0),
   lowStockThreshold: z.number().int().min(0).default(3),
 });
@@ -226,12 +234,68 @@ export const campaignInputSchema = z.object({
   message: z.string().min(5).max(600),
 });
 
-export const commentRuleInputSchema = z.object({
+const autoMessageSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("text"), text: z.string().min(1).max(1000) }),
+  z.object({ kind: z.literal("image"), url: z.string().url(), caption: z.string().max(1000).optional() }),
+  z.object({ kind: z.literal("audio"), url: z.string().url() }),
+  z.object({ kind: z.literal("video"), url: z.string().url() }),
+  z.object({
+    kind: z.literal("buttons"),
+    text: z.string().min(1).max(640),
+    buttons: z.array(z.object({ title: z.string().min(1).max(20), url: z.string().url() })).min(1).max(3),
+  }),
+  z.object({ kind: z.literal("form"), formId: z.string().uuid(), text: z.string().min(1).max(640) }),
+]);
+
+export const AUTOMATION_TRIGGERS = ["comment", "story_reply", "story_mention", "dm_keyword", "first_message"] as const;
+
+export const automationRuleInputSchema = z.object({
+  name: z.string().min(1).max(80),
+  trigger: z.enum(AUTOMATION_TRIGGERS),
   mediaId: z.string().max(80).nullable().optional(),
-  keywords: z.array(z.string().min(1).max(40)).min(1).max(20),
-  replyText: z.string().min(1).max(900),
-  publicReply: z.string().max(300).optional(),
+  keywords: z.array(z.string().min(1).max(60)).max(30).default([]),
+  matchMode: z.enum(["contains", "exact", "any"]).default("contains"),
+  publicReply: z.string().max(300).nullable().optional(),
+  privateReply: z.string().max(1000).nullable().optional(),
+  messages: z.array(autoMessageSchema).max(8).default([]),
+  thenMode: z.enum(["keep", "agent", "human"]).default("keep"),
+  priority: z.number().int().min(0).max(100).default(0),
   active: z.boolean().default(true),
+});
+
+export const formFieldSchema = z.object({
+  key: z.string().regex(/^[a-z][a-z0-9_]{0,30}$/),
+  label: z.string().min(1).max(120),
+  type: z.enum(["text", "textarea", "phone", "email", "number", "select", "date", "checkbox"]),
+  required: z.boolean().default(false),
+  options: z.array(z.string().min(1).max(80)).max(30).optional(),
+});
+
+export const formInputSchema = z.object({
+  title: z.string().min(1).max(120),
+  description: z.string().max(1000).default(""),
+  fields: z.array(formFieldSchema).min(1).max(30),
+  successMessage: z.string().max(500).default(""),
+  active: z.boolean().default(true),
+});
+
+export const knowledgeInputSchema = z.object({
+  title: z.string().min(1).max(200),
+  content: z.string().min(1).max(8000),
+  source: z.enum(["manual", "faq", "dm_history", "document"]).default("manual"),
+  active: z.boolean().default(true),
+});
+
+export const usdRateSchema = z.object({ rate: z.number().int().min(1000).max(100_000_000) });
+
+export const walkInSchema = z.object({
+  serviceId: z.string().uuid(),
+  staffId: z.string().uuid(),
+  startsAt: z.coerce.date().optional(),
+  customer: z.object({ phone: phoneSchema, name: z.string().min(2).max(80) }),
+  note: z.string().max(500).optional(),
+  /** skip working-hours checks (still refuses double booking) */
+  outsideHours: z.boolean().default(false),
 });
 
 export type CreateShopInput = z.infer<typeof createShopSchema>;

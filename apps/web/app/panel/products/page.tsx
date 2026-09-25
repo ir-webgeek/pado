@@ -3,6 +3,7 @@
 import { ImageOff, Package, Plus, Search, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { Badge, Button, Card, Empty, ErrorNote, Field, Input, Modal, PageHeader, Select, Spinner, Textarea } from "@/components/ui";
+import { UploadButton } from "@/components/upload";
 import { api, useApi } from "@/lib/api";
 import { latinDigits, money, num } from "@/lib/format";
 import type { DictKey } from "@/lib/i18n";
@@ -14,11 +15,12 @@ interface VariantDraft {
   id?: string;
   attr: string; // "size: 38, color: cream"
   price: string;
+  usd: string; // USD price, e.g. "45.00"
   stock: string;
   sku: string;
 }
 
-const emptyVariant = (): VariantDraft => ({ attr: "", price: "", stock: "0", sku: "" });
+const emptyVariant = (): VariantDraft => ({ attr: "", price: "", usd: "", stock: "0", sku: "" });
 
 function parseAttrs(s: string): Record<string, string> {
   const out: Record<string, string> = {};
@@ -118,10 +120,23 @@ function ProductEditor({ product, onClose, onSaved }: { product: Product | null;
   const { shop } = useShop();
   const [title, setTitle] = useState(product?.title ?? "");
   const [description, setDescription] = useState(product?.description ?? "");
-  const [images, setImages] = useState(product?.images.join("\n") ?? "");
+  const [images, setImages] = useState<string[]>(product?.images ?? []);
   const [status, setStatus] = useState<Product["status"]>(product?.status ?? "active");
+  const [categoryId, setCategoryId] = useState(product?.categoryId ?? "");
+  const [seoTitle, setSeoTitle] = useState(product?.seoTitle ?? "");
+  const [seoDescription, setSeoDescription] = useState(product?.seoDescription ?? "");
+  const { data: categories } = useApi<{ id: string; name: string }[]>(`/shops/${shop.id}/categories`);
+  const { data: shopInfo } = useApi<{ shop: { settings: { pricing: { usdEnabled: boolean; usdRate: number } } } }>(`/shops/${shop.id}`);
+  const usd = shopInfo?.shop.settings.pricing;
   const [variants, setVariants] = useState<VariantDraft[]>(
-    product?.variants.map((v) => ({ id: v.id, attr: attrsToText(v.attributes), price: String(v.price), stock: String(v.stock), sku: v.sku ?? "" })) ?? [emptyVariant()],
+    product?.variants.map((v) => ({
+      id: v.id,
+      attr: attrsToText(v.attributes),
+      price: String(v.price),
+      usd: v.priceUsdCents ? (v.priceUsdCents / 100).toFixed(2) : "",
+      stock: String(v.stock),
+      sku: v.sku ?? "",
+    })) ?? [emptyVariant()],
   );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<unknown>(null);
@@ -136,11 +151,15 @@ function ProductEditor({ product, onClose, onSaved }: { product: Product | null;
         title,
         description,
         status,
-        images: images.split("\n").map((s) => s.trim()).filter(Boolean),
+        images,
+        categoryId: categoryId || null,
+        seoTitle: seoTitle || undefined,
+        seoDescription: seoDescription || undefined,
         variants: variants.map((v) => ({
           ...(v.id ? { id: v.id } : {}),
           attributes: parseAttrs(v.attr),
           price: Number(latinDigits(v.price) || 0),
+          priceUsdCents: v.usd ? Math.round(Number(latinDigits(v.usd)) * 100) : null,
           stock: Number(latinDigits(v.stock) || 0),
           sku: v.sku || undefined,
           lowStockThreshold: 3,
@@ -162,7 +181,7 @@ function ProductEditor({ product, onClose, onSaved }: { product: Product | null;
           <Field label={t("pr.title")} className="sm:col-span-2">
             <Input value={title} onChange={(e) => setTitle(e.target.value)} />
           </Field>
-          <Field label="Status">
+          <Field label={t("pr.statusLabel")}>
             <Select value={status} onChange={(e) => setStatus(e.target.value as Product["status"])}>
               {(["active", "draft", "archived"] as const).map((s) => (
                 <option key={s} value={s}>{t(`pr.status.${s}`)}</option>
@@ -173,16 +192,56 @@ function ProductEditor({ product, onClose, onSaved }: { product: Product | null;
         <Field label={t("pr.desc")}>
           <Textarea value={description} onChange={(e) => setDescription(e.target.value)} />
         </Field>
-        <Field label={t("pr.images")}>
-          <Textarea dir="ltr" className="min-h-16 text-xs" value={images} onChange={(e) => setImages(e.target.value)} />
-        </Field>
+        <div>
+          <p className="label">{t("pr.images")}</p>
+          <div className="flex flex-wrap items-center gap-2">
+            {images.map((src, i) => (
+              <span key={src} className="group relative">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={src} alt="" className="size-20 rounded-xl object-cover" />
+                <button onClick={() => setImages((im) => im.filter((_, j) => j !== i))} className="absolute -end-1.5 -top-1.5 hidden rounded-full bg-danger p-1 text-white group-hover:block">
+                  <Trash2 className="size-3" />
+                </button>
+                {i === 0 && <span className="absolute bottom-1 start-1 rounded bg-black/60 px-1 text-[9px] text-white">★</span>}
+              </span>
+            ))}
+            <UploadButton label={t("au.upload")} onUploaded={(url) => setImages((im) => [...im, url])} />
+          </div>
+          <Input dir="ltr" className="mt-2 text-xs" placeholder="https://... (Enter)" onKeyDown={(e) => {
+            if (e.key === "Enter" && e.currentTarget.value.startsWith("http")) {
+              e.preventDefault();
+              const v = e.currentTarget.value.trim();
+              setImages((im) => [...im, v]);
+              e.currentTarget.value = "";
+            }
+          }} />
+        </div>
+        <div className="grid gap-3 sm:grid-cols-3">
+          <Field label={t("sf.category")}>
+            <Select value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
+              <option value="">—</option>
+              {(categories ?? []).map((c) => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+            </Select>
+          </Field>
+          <Field label={t("pr.seoTitle")}>
+            <Input value={seoTitle} maxLength={120} onChange={(e) => setSeoTitle(e.target.value)} />
+          </Field>
+          <Field label={t("pr.seoDesc")}>
+            <Input value={seoDescription} maxLength={300} onChange={(e) => setSeoDescription(e.target.value)} />
+          </Field>
+        </div>
         <div>
           <p className="label">{t("pr.variants")}</p>
           <div className="space-y-2">
             {variants.map((v, i) => (
               <div key={i} className="grid grid-cols-12 gap-2 rounded-xl bg-[var(--surface-sunken)] p-2">
-                <Input className="col-span-12 sm:col-span-4" placeholder={t("pr.attr")} value={v.attr} onChange={(e) => setV(i, { attr: e.target.value })} />
-                <Input className="col-span-5 sm:col-span-3" inputMode="numeric" placeholder={t("pr.price")} value={v.price} onChange={(e) => setV(i, { price: e.target.value })} />
+                <Input className={usd?.usdEnabled ? "col-span-12 sm:col-span-3" : "col-span-12 sm:col-span-4"} placeholder={t("pr.attr")} value={v.attr} onChange={(e) => setV(i, { attr: e.target.value })} />
+                {usd?.usdEnabled && (
+                  <Input className="col-span-4 sm:col-span-1" dir="ltr" inputMode="decimal" placeholder="$" title={t("pc.usdPrice")} value={v.usd} onChange={(e) => setV(i, { usd: e.target.value })} />
+                )}
+                <Input className={usd?.usdEnabled ? "col-span-4 sm:col-span-3" : "col-span-5 sm:col-span-3"} inputMode="numeric" placeholder={t("pr.price")} disabled={Boolean(usd?.usdEnabled && v.usd)} value={v.price} onChange={(e) => setV(i, { price: e.target.value })} />
                 <Input className="col-span-3 sm:col-span-2" inputMode="numeric" placeholder={t("pr.stock")} value={v.stock} onChange={(e) => setV(i, { stock: e.target.value })} />
                 <Input className="col-span-3 sm:col-span-2" dir="ltr" placeholder={t("pr.sku")} value={v.sku} onChange={(e) => setV(i, { sku: e.target.value })} />
                 <button className="col-span-1 flex items-center justify-center muted hover:text-danger disabled:opacity-30" disabled={variants.length === 1} onClick={() => setVariants((vs) => vs.filter((_, j) => j !== i))}>
@@ -198,7 +257,7 @@ function ProductEditor({ product, onClose, onSaved }: { product: Product | null;
         <ErrorNote error={error} />
         <div className="flex justify-end gap-2">
           <Button onClick={onClose}>{t("a.cancel")}</Button>
-          <Button variant="primary" loading={saving} onClick={save} disabled={!title || variants.some((v) => !v.price)}>
+          <Button variant="primary" loading={saving} onClick={save} disabled={!title || variants.some((v) => !v.price && !v.usd)}>
             {t("a.save")}
           </Button>
         </div>

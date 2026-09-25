@@ -1,4 +1,4 @@
-import { and, eq, gte, inArray, isNull, lt, ne, or, sql } from "drizzle-orm";
+import { and, eq, gt, gte, inArray, isNull, lt, ne, or, sql } from "drizzle-orm";
 import {
   appointments,
   customers,
@@ -391,7 +391,7 @@ export async function expireHoldIfDue(db: Database, appointmentId: string) {
   return Boolean(row);
 }
 
-export async function calendar(db: DbOrTx, shopId: string, from: Date, to: Date, staffIds?: string[]) {
+export async function calendar(db: DbOrTx, shopId: string, from: Date, to: Date, staffIds?: string[], opts: { refundRequested?: boolean } = {}) {
   const rows = await db
     .select({
       appt: appointments,
@@ -408,14 +408,17 @@ export async function calendar(db: DbOrTx, shopId: string, from: Date, to: Date,
     .innerJoin(staff, eq(staff.id, appointments.staffId))
     .innerJoin(customers, eq(customers.id, appointments.customerId))
     .where(
-      and(
-        eq(appointments.shopId, shopId),
-        lt(appointments.startsAt, to),
-        gte(appointments.endsAt, from),
-        staffIds?.length ? inArray(appointments.staffId, staffIds) : undefined,
-      ),
+      opts.refundRequested
+        ? and(eq(appointments.shopId, shopId), eq(appointments.refundStatus, "requested"))
+        : and(
+            eq(appointments.shopId, shopId),
+            lt(appointments.startsAt, to),
+            gte(appointments.endsAt, from),
+            staffIds?.length ? inArray(appointments.staffId, staffIds) : undefined,
+          ),
     )
-    .orderBy(appointments.startsAt);
+    .orderBy(appointments.startsAt)
+    .limit(opts.refundRequested ? 100 : 2000);
   const blocks = await db
     .select()
     .from(timeOff)
@@ -436,4 +439,83 @@ export async function calendar(db: DbOrTx, shopId: string, from: Date, to: Date,
     })),
     timeOff: blocks,
   };
+}
+
+/**
+ * Offline / walk-in booking by the shop: any start time (defaults to now), optionally outside working
+ * hours. The only hard rule kept is "no double booking" for the staff member (capacity-aware).
+ */
+export async function bookWalkIn(
+  db: Database,
+  queues: Queues,
+  shopId: string,
+  input: { serviceId: string; staffId: string; startsAt?: Date; customer: { phone: string; name: string }; note?: string; outsideHours: boolean },
+  actor: Actor,
+) {
+  const startsAt = input.startsAt ?? new Date(Math.floor(Date.now() / (5 * MIN)) * 5 * MIN);
+  const appt = await db.transaction(async (tx) => {
+    const { shop, settings } = await loadShop(tx, shopId);
+    const svc = await loadService(tx, shopId, input.serviceId);
+    const link = await tx.query.staffServices.findFirst({ where: and(eq(staffServices.staffId, input.staffId), eq(staffServices.serviceId, svc.id)) });
+    const member = await tx.query.staff.findFirst({ where: and(eq(staff.id, input.staffId), eq(staff.shopId, shopId)) });
+    if (!member) throw notFound("staff");
+    await lockStaff(tx, [member.id]);
+
+    const durationMin = link?.durationOverride ?? svc.durationMin;
+    const endsAt = new Date(startsAt.getTime() + durationMin * MIN);
+    const blockStart = new Date(startsAt.getTime() - svc.bufferBeforeMin * MIN);
+    const blockEnd = new Date(endsAt.getTime() + svc.bufferAfterMin * MIN);
+
+    if (!input.outsideHours) {
+      const date = zonedIsoDate(startsAt, shop.timezone);
+      const dayStart = zonedToUtc(date, 0, shop.timezone).getTime();
+      const startMin = (startsAt.getTime() - dayStart) / MIN;
+      const hours = await tx.select().from(workingHours).where(eq(workingHours.staffId, member.id));
+      const weekday = new Date(`${date}T12:00:00Z`).getUTCDay();
+      const inside = hours.some((h) => h.weekday === weekday && startMin >= h.startMin && startMin + durationMin <= h.endMin);
+      if (!inside) throw conflict("outside_hours", "outside this staff member's working hours");
+    }
+
+    const overlapping = await tx
+      .select({ serviceId: appointments.serviceId, startsAt: appointments.startsAt })
+      .from(appointments)
+      .where(
+        and(
+          eq(appointments.staffId, member.id),
+          inArray(appointments.status, BLOCKING_APPOINTMENT_STATUSES),
+          lt(appointments.blockStart, blockEnd),
+          gt(appointments.blockEnd, blockStart),
+        ),
+      );
+    const sameSession = overlapping.filter((o) => o.serviceId === svc.id && o.startsAt.getTime() === startsAt.getTime());
+    const conflicts = overlapping.length - sameSession.length;
+    if (conflicts > 0 || sameSession.length >= svc.capacity) throw conflict("slot_unavailable", "this staff member is busy at that time");
+
+    const customer = await upsertCustomer(tx, shopId, input.customer);
+    const [row] = await tx
+      .insert(appointments)
+      .values({
+        shopId,
+        code: bookingCode(),
+        accessToken: randomToken(18),
+        serviceId: svc.id,
+        staffId: member.id,
+        customerId: customer!.id,
+        startsAt,
+        endsAt,
+        blockStart,
+        blockEnd,
+        status: startsAt.getTime() <= Date.now() + 5 * MIN ? "checked_in" : "confirmed",
+        channel: "pos",
+        price: link?.priceOverride ?? svc.price,
+        note: input.note,
+        confirmedAt: new Date(),
+        checkedInAt: startsAt.getTime() <= Date.now() + 5 * MIN ? new Date() : null,
+      })
+      .returning();
+    await audit(tx, shopId, actor, "appointment.walk_in", "appointment", row!.id);
+    return { appt: row!, settings };
+  });
+  await scheduleAppointmentJobs(queues, appt.appt, appt.settings);
+  return appt.appt;
 }

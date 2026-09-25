@@ -66,6 +66,8 @@ export const users = pgTable("users", {
   id: id(),
   phone: text().notNull().unique(),
   name: text(),
+  /** platform operator (super admin dashboard) */
+  isSuperAdmin: boolean().notNull().default(false),
   createdAt: createdAt(),
 });
 
@@ -98,8 +100,20 @@ export interface ShopSettings {
     autoConfirm: boolean;
     reminderOffsetsMin: number[];
   };
-  agent: { enabled: boolean; tone: string; rules: string; neverOfferDiscount: boolean; knowledge: string };
+  agent: {
+    enabled: boolean;
+    tone: string;
+    rules: string;
+    neverOfferDiscount: boolean;
+    knowledge: string;
+    /** show the AI shopping / booking consultant on the storefront and booking pages */
+    consultOnWeb: boolean;
+    /** style guide distilled from past human replies (learn-from-DMs) */
+    learnedStyle: string;
+  };
   cardToCard: { cardNumber: string; holder: string; bank: string };
+  /** optional USD-linked pricing: variant price = priceUsd x rate x (1 + markup), rounded */
+  pricing: { usdEnabled: boolean; usdRate: number; markupPercent: number; roundTo: number; rateUpdatedAt: string | null; autoFetch: boolean };
 }
 
 export const DEFAULT_SHOP_SETTINGS: ShopSettings = {
@@ -114,8 +128,17 @@ export const DEFAULT_SHOP_SETTINGS: ShopSettings = {
     autoConfirm: true,
     reminderOffsetsMin: [24 * 60, 120],
   },
-  agent: { enabled: false, tone: "friendly, short, warm; uses the customer's language", rules: "", neverOfferDiscount: true, knowledge: "" },
+  agent: {
+    enabled: false,
+    tone: "friendly, short, warm; uses the customer's language",
+    rules: "",
+    neverOfferDiscount: true,
+    knowledge: "",
+    consultOnWeb: false,
+    learnedStyle: "",
+  },
   cardToCard: { cardNumber: "", holder: "", bank: "" },
+  pricing: { usdEnabled: false, usdRate: 0, markupPercent: 0, roundTo: 1000, rateUpdatedAt: null, autoFetch: false },
 };
 
 export type PartialShopSettings = { [K in keyof ShopSettings]?: Partial<ShopSettings[K]> };
@@ -130,7 +153,17 @@ export function resolveShopSettings(stored: PartialShopSettings | null | undefin
     booking: { ...DEFAULT_SHOP_SETTINGS.booking, ...s.booking },
     agent: { ...DEFAULT_SHOP_SETTINGS.agent, ...s.agent },
     cardToCard: { ...DEFAULT_SHOP_SETTINGS.cardToCard, ...s.cardToCard },
+    pricing: { ...DEFAULT_SHOP_SETTINGS.pricing, ...s.pricing },
   };
+}
+
+export interface StoreLanding {
+  headline: string;
+  subheadline: string;
+  highlights: { title: string; text: string }[];
+  faq: { q: string; a: string }[];
+  featuredCategorySlugs: string[];
+  generatedAt: string;
 }
 
 export const shops = pgTable(
@@ -143,6 +176,7 @@ export const shops = pgTable(
     ownerId: uuid()
       .notNull()
       .references(() => users.id),
+    // new shops get "free" from the API (an enum value can't be used as default in the migration that adds it)
     plan: planId().notNull().default("starter"),
     planExpiresAt: timestamp({ withTimezone: true }),
     timezone: text().notNull().default("Asia/Tehran"),
@@ -158,6 +192,11 @@ export const shops = pgTable(
     igUsername: text(),
     igAccessToken: text(),
     telegramChatId: text(),
+    /** merchant Sheba (IR...) that receives the shop's share when split payments go live */
+    settlementIban: text(),
+    /** AI-generated (then editable) storefront landing content */
+    landing: jsonb().$type<StoreLanding>(),
+    suspendedAt: timestamp({ withTimezone: true }),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -246,6 +285,8 @@ export const productVariants = pgTable(
     attributes: jsonb().$type<Record<string, string>>().notNull().default({}),
     price: money().notNull(),
     compareAtPrice: money(),
+    /** optional USD price in cents; when the shop enables USD pricing, `price` is derived from it */
+    priceUsdCents: integer(),
     stock: integer().notNull().default(0),
     reserved: integer().notNull().default(0),
     lowStockThreshold: integer().notNull().default(3),
@@ -587,6 +628,8 @@ export const appointments = pgTable(
     internalNote: text(),
     cancelReason: text(),
     cancelledBy: text(), // customer | shop | system
+    /** set when a paid booking is cancelled - the shop settles the refund */
+    refundStatus: text(), // requested | refunded | kept
     confirmedAt: timestamp({ withTimezone: true }),
     checkedInAt: timestamp({ withTimezone: true }),
     completedAt: timestamp({ withTimezone: true }),
@@ -616,6 +659,8 @@ export const payments = pgTable(
     provider: text().notNull(), // mock | zarinpal | card_to_card | cash
     method: paymentMethod().notNull(),
     amount: money().notNull(),
+    /** platform commission (e.g. 1%) - settled via split payment once a shared gateway is live */
+    platformFee: money().notNull().default(0),
     status: text().notNull().default("initiated"), // initiated | pending_review | paid | failed | refunded
     authority: text(),
     refId: text(),
@@ -686,20 +731,177 @@ export const messages = pgTable(
   (t) => [index().on(t.conversationId, t.createdAt), uniqueIndex().on(t.shopId, t.externalId)],
 );
 
-export const commentRules = pgTable(
-  "comment_rules",
+/** One message in a static (non-AI) automated reply. */
+export type AutoMessage =
+  | { kind: "text"; text: string }
+  | { kind: "image"; url: string; caption?: string }
+  | { kind: "audio"; url: string }
+  | { kind: "video"; url: string }
+  | { kind: "buttons"; text: string; buttons: { title: string; url: string }[] }
+  | { kind: "form"; formId: string; text: string };
+
+/**
+ * Keyword / event triggered replies that run without AI (free tier).
+ * - comment: comment on a post or reel (optionally a specific media)
+ * - story_reply: reply to one of the shop's stories
+ * - story_mention: the shop was mentioned in a story
+ * - dm_keyword: a direct message containing a keyword
+ * - first_message: the very first DM from a new person (welcome)
+ */
+export const automationRules = pgTable(
+  "automation_rules",
   {
     id: id(),
     shopId: shopRef(),
+    name: text().notNull(),
+    trigger: text().notNull(), // comment | story_reply | story_mention | dm_keyword | first_message
     mediaId: text(),
-    keywords: jsonb().$type<string[]>().notNull(),
-    replyText: text().notNull(),
+    keywords: jsonb().$type<string[]>().notNull().default([]),
+    matchMode: text().notNull().default("contains"), // contains | exact | any
+    /** public reply under the comment (comment trigger only) */
     publicReply: text(),
+    /** comment trigger: the single private reply Instagram allows */
+    privateReply: text(),
+    /** DM triggers (and comment follow-ups once the person answers): sent in order */
+    messages: jsonb().$type<AutoMessage[]>().notNull().default([]),
+    /** when the rule fires, hand the rest of the conversation to AI or keep it manual */
+    thenMode: text().notNull().default("keep"), // keep | agent | human
+    priority: integer().notNull().default(0),
     active: boolean().notNull().default(true),
     hits: integer().notNull().default(0),
     createdAt: createdAt(),
   },
-  (t) => [index().on(t.shopId, t.active)],
+  (t) => [index().on(t.shopId, t.trigger, t.active)],
+);
+
+export const automationEvents = pgTable(
+  "automation_events",
+  {
+    id: id(),
+    shopId: shopRef(),
+    ruleId: uuid().references(() => automationRules.id, { onDelete: "set null" }),
+    conversationId: uuid(),
+    trigger: text().notNull(),
+    input: text(),
+    ok: boolean().notNull().default(true),
+    error: text(),
+    createdAt: createdAt(),
+  },
+  (t) => [index().on(t.shopId, t.createdAt)],
+);
+
+// ---------------------------------------------------------------- forms
+export interface FormField {
+  key: string;
+  label: string;
+  type: "text" | "textarea" | "phone" | "email" | "number" | "select" | "date" | "checkbox";
+  required: boolean;
+  options?: string[];
+}
+
+export const forms = pgTable(
+  "forms",
+  {
+    id: id(),
+    shopId: shopRef(),
+    title: text().notNull(),
+    description: text().notNull().default(""),
+    fields: jsonb().$type<FormField[]>().notNull(),
+    successMessage: text().notNull().default(""),
+    active: boolean().notNull().default(true),
+    submissions: integer().notNull().default(0),
+    createdAt: createdAt(),
+  },
+  (t) => [index().on(t.shopId)],
+);
+
+export const formSubmissions = pgTable(
+  "form_submissions",
+  {
+    id: id(),
+    shopId: shopRef(),
+    formId: uuid()
+      .notNull()
+      .references(() => forms.id, { onDelete: "cascade" }),
+    customerId: uuid().references(() => customers.id, { onDelete: "set null" }),
+    conversationId: uuid(),
+    data: jsonb().$type<Record<string, string | boolean>>().notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [index().on(t.formId, t.createdAt)],
+);
+
+// ---------------------------------------------------------------- AI knowledge (retrieval for the agent)
+export const knowledgeEntries = pgTable(
+  "knowledge_entries",
+  {
+    id: id(),
+    shopId: shopRef(),
+    source: text().notNull().default("manual"), // manual | faq | dm_history | document
+    title: text().notNull(),
+    content: text().notNull(),
+    active: boolean().notNull().default(true),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index().on(t.shopId, t.active),
+    index("knowledge_fts").using("gin", sql`to_tsvector('simple', ${t.title} || ' ' || ${t.content})`),
+    index("knowledge_trgm").using("gin", sql`${t.content} gin_trgm_ops`),
+  ],
+);
+
+export const agentRuns = pgTable(
+  "agent_runs",
+  {
+    id: id(),
+    shopId: shopRef(),
+    conversationId: uuid(),
+    channel: text().notNull(),
+    model: text().notNull(),
+    inputTokens: integer().notNull().default(0),
+    outputTokens: integer().notNull().default(0),
+    cost: money().notNull().default(0),
+    tools: jsonb().$type<{ name: string; ok: boolean }[]>().notNull().default([]),
+    handoff: text(),
+    reply: text(),
+    error: text(),
+    durationMs: integer().notNull().default(0),
+    createdAt: createdAt(),
+  },
+  (t) => [index().on(t.shopId, t.createdAt), index().on(t.createdAt)],
+);
+
+// ---------------------------------------------------------------- Instagram posts -> products
+export interface ExtractedProduct {
+  isProduct: boolean;
+  confidence: number;
+  title: string;
+  description: string;
+  price: number | null;
+  variants: { attributes: Record<string, string>; price: number | null }[];
+  category: string | null;
+}
+
+export const igMedia = pgTable(
+  "ig_media",
+  {
+    id: id(),
+    shopId: shopRef(),
+    mediaId: text().notNull(),
+    mediaType: text().notNull(),
+    caption: text().notNull().default(""),
+    mediaUrl: text(),
+    thumbnailUrl: text(),
+    permalink: text(),
+    childUrls: jsonb().$type<string[]>().notNull().default([]),
+    postedAt: timestamp({ withTimezone: true }),
+    status: text().notNull().default("new"), // new | analyzed | imported | ignored
+    extracted: jsonb().$type<ExtractedProduct>(),
+    productId: uuid().references(() => products.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex().on(t.shopId, t.mediaId), index().on(t.shopId, t.status)],
 );
 
 export const campaigns = pgTable(

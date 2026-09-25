@@ -13,14 +13,15 @@ interface Settings {
   vipRule: { minOrders: number; minSpend: number; withinDays: number };
   atRiskDays: number;
   booking: { slotStepMin: number; minNoticeMin: number; maxAdvanceDays: number; cancelWindowMin: number; autoConfirm: boolean; reminderOffsetsMin: number[] };
-  agent: { enabled: boolean; tone: string; rules: string; neverOfferDiscount: boolean; knowledge: string };
+  agent: { enabled: boolean; tone: string; rules: string; neverOfferDiscount: boolean; knowledge: string; consultOnWeb: boolean };
   cardToCard: { cardNumber: string; holder: string; bank: string };
+  pricing: { usdEnabled: boolean; usdRate: number; markupPercent: number; roundTo: number; rateUpdatedAt: string | null; autoFetch: boolean };
 }
 interface ShopResp {
-  shop: { id: string; name: string; kind: string; brandColor: string; timezone: string; telegramChatId: string | null; igUsername: string | null; instagramConnected: boolean; walletBalance: number; settings: Settings };
+  shop: { id: string; name: string; kind: string; brandColor: string; timezone: string; telegramChatId: string | null; settlementIban: string | null; igUsername: string | null; instagramConnected: boolean; walletBalance: number; settings: Settings };
 }
 
-type Tab = "general" | "agent" | "booking" | "loyalty" | "payments" | "integrations" | "wallet";
+type Tab = "general" | "agent" | "booking" | "loyalty" | "payments" | "pricing" | "integrations" | "wallet";
 
 export default function SettingsPage() {
   const { t } = useI18n();
@@ -34,6 +35,7 @@ export default function SettingsPage() {
     ...(shop.kind !== "retail" ? [{ value: "booking" as Tab, label: t("s.booking") }] : []),
     { value: "loyalty", label: t("s.loyalty") },
     { value: "payments", label: t("s.payments") },
+    ...(shop.kind !== "services" ? [{ value: "pricing" as Tab, label: t("pc.title") }] : []),
     { value: "integrations", label: t("s.integrations") },
     { value: "wallet", label: t("p.wallet") },
   ];
@@ -58,6 +60,10 @@ function SettingsForm({ tab, data, onSaved }: { tab: Tab; data: ShopResp; onSave
   const [loyalty, setLoyalty] = useState(s.loyalty);
   const [vip, setVip] = useState({ ...s.vipRule, atRiskDays: s.atRiskDays });
   const [card, setCard] = useState(s.cardToCard);
+  const [iban, setIban] = useState(data.shop.settlementIban ?? "");
+  const [pricing, setPricing] = useState(s.pricing);
+  const [rate, setRate] = useState(String(s.pricing.usdRate || ""));
+  const [rateResult, setRateResult] = useState<number | null>(null);
   const [telegram, setTelegram] = useState(data.shop.telegramChatId ?? "");
   const [ig, setIg] = useState({ igUserId: "", accessToken: "", username: data.shop.igUsername ?? "" });
   const [saved, setSaved] = useState(false);
@@ -87,8 +93,10 @@ function SettingsForm({ tab, data, onSaved }: { tab: Tab; data: ShopResp; onSave
               : tab === "loyalty"
                 ? { loyalty, vipRule: { minOrders: vip.minOrders, minSpend: vip.minSpend, withinDays: vip.withinDays }, atRiskDays: vip.atRiskDays }
                 : tab === "payments"
-                  ? { cardToCard: card }
-                  : { telegramChatId: telegram };
+                  ? { cardToCard: card, ...(iban ? { settlementIban: iban.replace(/\s/g, "").toUpperCase() } : {}) }
+                  : tab === "pricing"
+                    ? { pricing: { usdEnabled: pricing.usdEnabled, markupPercent: pricing.markupPercent, roundTo: pricing.roundTo, autoFetch: pricing.autoFetch } }
+                    : { telegramChatId: telegram };
       await api(`/shops/${shop.id}/settings`, { method: "PATCH", json: body });
       setSaved(true);
       onSaved();
@@ -117,7 +125,7 @@ function SettingsForm({ tab, data, onSaved }: { tab: Tab; data: ShopResp; onSave
             <Field label={t("s.brandColor")}>
               <Input type="color" className="h-11 !p-1" value={general.brandColor} onChange={(e) => setGeneral({ ...general, brandColor: e.target.value })} />
             </Field>
-            <Field label="Timezone">
+            <Field label={t("s.timezone")}>
               <Input dir="ltr" value={general.timezone} onChange={(e) => setGeneral({ ...general, timezone: e.target.value })} />
             </Field>
           </div>
@@ -127,6 +135,7 @@ function SettingsForm({ tab, data, onSaved }: { tab: Tab; data: ShopResp; onSave
         <>
           <Toggle checked={agent.enabled} onChange={(v) => setAgent({ ...agent, enabled: v })} label={t("s.agentEnabled")} />
           <Toggle checked={agent.neverOfferDiscount} onChange={(v) => setAgent({ ...agent, neverOfferDiscount: v })} label={t("s.neverDiscount")} />
+          <Toggle checked={agent.consultOnWeb} onChange={(v) => setAgent({ ...agent, consultOnWeb: v })} label={t("ai.consult")} />
           <Field label={t("s.tone")}>
             <Input value={agent.tone} onChange={(e) => setAgent({ ...agent, tone: e.target.value })} />
           </Field>
@@ -154,7 +163,7 @@ function SettingsForm({ tab, data, onSaved }: { tab: Tab; data: ShopResp; onSave
               <Input inputMode="numeric" value={booking.cancelWindowMin} onChange={(e) => setBooking({ ...booking, cancelWindowMin: n(e.target.value) })} />
             </Field>
           </div>
-          <Field label="Reminders (min before, comma separated)">
+          <Field label={t("s.reminders")}>
             <Input
               dir="ltr"
               value={booking.reminderOffsetsMin.join(", ")}
@@ -183,7 +192,7 @@ function SettingsForm({ tab, data, onSaved }: { tab: Tab; data: ShopResp; onSave
             <Field label={t("c.spent")}>
               <Input inputMode="numeric" value={vip.minSpend} onChange={(e) => setVip({ ...vip, minSpend: n(e.target.value) })} />
             </Field>
-            <Field label="Days">
+            <Field label={t("s.days")}>
               <Input inputMode="numeric" value={vip.withinDays} onChange={(e) => setVip({ ...vip, withinDays: n(e.target.value) })} />
             </Field>
             <Field label={t("seg.at_risk")}>
@@ -197,6 +206,9 @@ function SettingsForm({ tab, data, onSaved }: { tab: Tab; data: ShopResp; onSave
           <Field label={t("s.card")}>
             <Input dir="ltr" inputMode="numeric" value={card.cardNumber} onChange={(e) => setCard({ ...card, cardNumber: latinDigits(e.target.value).replace(/\D/g, "") })} />
           </Field>
+          <Field label={t("s.iban")} hint="IR + 24 digits">
+            <Input dir="ltr" value={iban} onChange={(e) => setIban(latinDigits(e.target.value))} placeholder="IR000000000000000000000000" />
+          </Field>
           <div className="grid grid-cols-2 gap-3">
             <Field label={t("s.cardHolder")}>
               <Input value={card.holder} onChange={(e) => setCard({ ...card, holder: e.target.value })} />
@@ -205,6 +217,45 @@ function SettingsForm({ tab, data, onSaved }: { tab: Tab; data: ShopResp; onSave
               <Input value={card.bank} onChange={(e) => setCard({ ...card, bank: e.target.value })} />
             </Field>
           </div>
+        </>
+      )}
+      {tab === "pricing" && (
+        <>
+          <Toggle checked={pricing.usdEnabled} onChange={(v) => setPricing({ ...pricing, usdEnabled: v })} label={t("pc.enable")} />
+          <div className="grid grid-cols-2 gap-3">
+            <Field label={t("pc.markup")}>
+              <Input inputMode="decimal" value={pricing.markupPercent} onChange={(e) => setPricing({ ...pricing, markupPercent: Number(latinDigits(e.target.value) || 0) })} />
+            </Field>
+            <Field label={t("pc.round")}>
+              <Select value={pricing.roundTo} onChange={(e) => setPricing({ ...pricing, roundTo: Number(e.target.value) })}>
+                {[1, 1000, 5000, 10000, 50000, 100000].map((r) => (
+                  <option key={r} value={r}>{r.toLocaleString()}</option>
+                ))}
+              </Select>
+            </Field>
+          </div>
+          <Toggle checked={pricing.autoFetch} onChange={(v) => setPricing({ ...pricing, autoFetch: v })} label={t("pc.auto")} />
+          <div className="flex flex-wrap items-end gap-2 rounded-xl bg-[var(--surface-sunken)] p-3">
+            <Field label={t("pc.rate")} className="flex-1" hint={s.pricing.rateUpdatedAt ? `✓ ${dateTime(s.pricing.rateUpdatedAt, "fa")}` : undefined}>
+              <Input inputMode="numeric" value={rate} onChange={(e) => setRate(e.target.value)} />
+            </Field>
+            <Button
+              disabled={!pricing.usdEnabled || !rate}
+              onClick={async () => {
+                try {
+                  await api(`/shops/${shop.id}/settings`, { method: "PATCH", json: { pricing: { usdEnabled: true, markupPercent: pricing.markupPercent, roundTo: pricing.roundTo } } });
+                  const r = await api<{ updated: number }>(`/shops/${shop.id}/pricing/usd-rate`, { method: "POST", json: { rate: Number(latinDigits(rate)) } });
+                  setRateResult(r.updated);
+                  onSaved();
+                } catch (e) {
+                  setError(e);
+                }
+              }}
+            >
+              {t("pc.apply")}
+            </Button>
+          </div>
+          {rateResult !== null && <p className="text-sm text-success">✓ {rateResult} {t("pc.updated")}</p>}
         </>
       )}
       {tab === "integrations" && (
@@ -220,7 +271,7 @@ function SettingsForm({ tab, data, onSaved }: { tab: Tab; data: ShopResp; onSave
               <Field label={t("s.igId")}>
                 <Input dir="ltr" value={ig.igUserId} onChange={(e) => setIg({ ...ig, igUserId: e.target.value })} />
               </Field>
-              <Field label="Username">
+              <Field label={t("s.username")}>
                 <Input dir="ltr" value={ig.username} onChange={(e) => setIg({ ...ig, username: e.target.value })} />
               </Field>
             </div>

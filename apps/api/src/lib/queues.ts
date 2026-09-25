@@ -17,8 +17,10 @@ export interface JobPayloads {
   "notify.appointment-booked": { appointmentId: string };
   "notify.appointment-cancelled": { appointmentId: string };
   "campaign.send": { campaignId: string };
+  "pricing.refresh-usd": Record<string, never>;
+  "instagram.analyze": { shopId: string; mediaRowIds: string[] };
   // inbound
-  "ig.message": { shopId: string; igsid: string; mid: string; text: string; attachments?: { type: string; url?: string }[] };
+  "ig.message": { shopId: string; igsid: string; mid: string; text: string; attachments?: { type: string; url?: string }[]; storyReplyId?: string };
   "ig.comment": { shopId: string; commentId: string; text: string; fromId: string; username?: string; mediaId?: string };
 }
 export type JobName = keyof JobPayloads;
@@ -34,6 +36,8 @@ const queueOf: Record<JobName, keyof typeof QUEUE_NAMES> = {
   "notify.appointment-booked": "events",
   "notify.appointment-cancelled": "events",
   "campaign.send": "events",
+  "pricing.refresh-usd": "scheduled",
+  "instagram.analyze": "inbound",
   "ig.message": "inbound",
   "ig.comment": "inbound",
 };

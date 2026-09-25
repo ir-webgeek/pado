@@ -18,12 +18,13 @@ export interface ShopCtx {
   settings: ShopSettings;
   role: MemberRole;
   memberId: string;
+  suspended: boolean;
 }
 
 declare module "@fastify/jwt" {
   interface FastifyJWT {
-    payload: { sub: string; typ: "access" };
-    user: { sub: string; typ: "access" };
+    payload: { sub: string; typ: "access" | "customer" };
+    user: { sub: string; typ: "access" | "customer" };
   }
 }
 
@@ -38,6 +39,19 @@ const membershipCache = new TtlCache<ShopCtx | null>(10_000);
 
 export function invalidateShopCache(shopId: string) {
   membershipCache.deleteByPrefix(`${shopId}:`);
+}
+
+/** Customer portal session: a JWT (typ "customer", sub = normalized phone) in the `cust` cookie. */
+export function customerPhone(req: FastifyRequest): string {
+  const token = req.cookies.cust ?? (req.headers["x-customer-token"] as string | undefined);
+  if (!token) throw unauthorized();
+  try {
+    const p = req.server.jwt.verify<{ sub: string; typ: string }>(token);
+    if (p.typ !== "customer") throw new Error("wrong token type");
+    return p.sub;
+  } catch {
+    throw unauthorized("session expired");
+  }
 }
 
 export async function authenticate(req: FastifyRequest) {
@@ -71,6 +85,7 @@ async function loadShopCtx(ctx: Ctx, shopId: string, userId: string): Promise<Sh
         settings: resolveShopSettings(row.shop.settings),
         role: row.role,
         memberId: row.memberId,
+        suspended: Boolean(row.shop.suspendedAt),
       }
     : null;
   membershipCache.set(key, value);
@@ -86,6 +101,7 @@ export function requireShop(ctx: Ctx, minRole: MemberRole = "viewer") {
     const shop = await loadShopCtx(ctx, shopId, req.user.sub);
     if (!shop) throw notFound("shop");
     if (ROLE_RANK[shop.role] < ROLE_RANK[minRole]) throw forbidden(`requires ${minRole} role`);
+    if (req.method !== "GET" && shop.suspended) throw forbidden("this shop is suspended - contact support");
     // writes are blocked while the plan is expired (reads stay available)
     if (req.method !== "GET" && shop.planExpiresAt && shop.planExpiresAt < new Date()) {
       throw paymentRequired("plan_expired", "subscription expired - renew to continue");

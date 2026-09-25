@@ -3,6 +3,11 @@
 import clsx from "clsx";
 import {
   CalendarClock,
+  ClipboardList,
+  Images,
+  ShieldCheck,
+  Sparkles,
+  Zap,
   ChevronDown,
   ExternalLink,
   LayoutGrid,
@@ -27,7 +32,7 @@ import { useI18n } from "@/lib/locale-client";
 import { ShopProvider, useShop, type ShopSummary } from "@/lib/shop";
 
 interface Me {
-  user: { id: string; phone: string; name: string | null };
+  user: { id: string; phone: string; name: string | null; isSuperAdmin: boolean };
   shops: ShopSummary[];
 }
 
@@ -55,11 +60,18 @@ const groups: { key: DictKey; items: NavItem[] }[] = [
     ],
   },
   {
-    key: "p.group.growth",
+    key: "p.group.automation",
     items: [
-      { href: "/panel/customers", key: "p.customers", icon: Users },
       { href: "/panel/inbox", key: "p.inbox", icon: MessageCircle },
+      { href: "/panel/automations", key: "p.automations", icon: Zap },
+      { href: "/panel/forms", key: "p.forms", icon: ClipboardList },
+      { href: "/panel/ai", key: "p.ai", icon: Sparkles },
+      { href: "/panel/instagram", key: "p.instagram", icon: Images, kinds: ["retail", "hybrid"] },
     ],
+  },
+  {
+    key: "p.group.growth",
+    items: [{ href: "/panel/customers", key: "p.customers", icon: Users }],
   },
   { key: "p.group.account", items: [{ href: "/panel/settings", key: "p.settings", icon: Settings }] },
 ];
@@ -151,6 +163,11 @@ export default function PanelLayout({ children }: { children: React.ReactNode })
               ))}
             </nav>
             <div className="mt-2 space-y-1 border-t border-[var(--border)] pt-3">
+              {me?.user.isSuperAdmin && (
+                <Link href="/admin" className="flex items-center gap-3 rounded-xl px-3 py-2 text-sm text-[var(--accent)] hover:bg-[var(--surface-sunken)]">
+                  <ShieldCheck className="size-4" /> {t("p.admin")}
+                </Link>
+              )}
               <a href={`/s/${ctx.shop.slug}`} target="_blank" className="flex items-center gap-3 rounded-xl px-3 py-2 text-sm muted hover:bg-[var(--surface-sunken)]">
                 <ExternalLink className="size-4" /> {t("p.viewStore")}
               </a>

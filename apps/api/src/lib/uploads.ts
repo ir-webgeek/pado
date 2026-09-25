@@ -11,6 +11,14 @@ const ALLOWED = new Map([
   ["image/webp", ".webp"],
   ["image/gif", ".gif"],
   ["application/pdf", ".pdf"],
+  // pre-recorded voice notes and clips for automated DMs
+  ["audio/mpeg", ".mp3"],
+  ["audio/mp4", ".m4a"],
+  ["audio/x-m4a", ".m4a"],
+  ["audio/aac", ".aac"],
+  ["audio/wav", ".wav"],
+  ["video/mp4", ".mp4"],
+  ["video/quicktime", ".mov"],
 ]);
 
 /**
@@ -20,7 +28,7 @@ const ALLOWED = new Map([
 export async function saveUpload(file: MultipartFile | undefined, folder: string): Promise<string> {
   if (!file) throw badRequest("file_required");
   const ext = ALLOWED.get(file.mimetype);
-  if (!ext) throw badRequest("file_type", "only images and PDF files are accepted");
+  if (!ext) throw badRequest("file_type", "unsupported file type");
   const buf = await file.toBuffer();
   if (file.file.truncated) throw badRequest("file_too_large");
   const now = new Date();

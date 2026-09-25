@@ -22,7 +22,8 @@ export const shopRoutes =
       return ctx.db.transaction(async (tx) => {
         const [shop] = await tx
           .insert(shops)
-          .values({ name, slug, kind, ownerId: req.user.sub, igUsername: instagramHandle, planExpiresAt: new Date(Date.now() + 14 * 86400_000) })
+          // free plan never expires: appointments + static automations are free forever
+          .values({ name, slug, kind, ownerId: req.user.sub, igUsername: instagramHandle, plan: "free", planExpiresAt: null })
           .returning();
         const [member] = await tx.insert(shopMembers).values({ shopId: shop!.id, userId: req.user.sub, role: "owner" }).returning();
         await tx.insert(shippingMethods).values([
@@ -63,7 +64,7 @@ export const shopRoutes =
       "/:shopId/settings",
       { preHandler: requireShop(ctx, "admin"), schema: { params: shopParams, body: updateShopSettingsSchema } },
       async (req) => {
-        const { name, kind, brandColor, theme, timezone, telegramChatId, ...nested } = req.body;
+        const { name, kind, brandColor, theme, timezone, telegramChatId, settlementIban, ...nested } = req.body;
         if (timezone) {
           try {
             new Intl.DateTimeFormat("en", { timeZone: timezone });
@@ -79,7 +80,7 @@ export const shopRoutes =
         }
         const [updated] = await ctx.db
           .update(shops)
-          .set({ name, kind, brandColor, theme, timezone, telegramChatId, settings: merged })
+          .set({ name, kind, brandColor, theme, timezone, telegramChatId, settlementIban, settings: merged })
           .where(eq(shops.id, req.shop.id))
           .returning();
         invalidateShopCache(req.shop.id);

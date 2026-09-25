@@ -1,6 +1,7 @@
 import { AtSign } from "lucide-react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { Assistant } from "@/components/store/assistant";
 import { CartButton, CartProvider } from "@/components/store/cart";
 import { LangToggle } from "@/components/prefs";
 import { getT } from "@/lib/locale-server";
@@ -27,17 +28,20 @@ export default async function StoreLayout({ children, params }: { children: Reac
                   {t("sf.bookNow")}
                 </Link>
               )}
+              <Link href="/me" className="rounded-full px-3 py-2 text-xs muted hover:bg-[var(--surface-sunken)]">
+                {t("p.myBookings")}
+              </Link>
               <LangToggle />
               {shop.kind !== "services" && <CartButton />}
             </nav>
           </div>
           {data.categories.length > 0 && shop.kind !== "services" && (
             <div className="mx-auto flex max-w-6xl gap-1 overflow-x-auto px-4 pb-2 text-sm">
-              <Link href={`/s/${slug}`} className="shrink-0 rounded-full px-3 py-1 muted hover:bg-[var(--surface-sunken)]">
-                {t("c.all")}
+              <Link href={`/s/${slug}/products`} className="shrink-0 rounded-full px-3 py-1 muted hover:bg-[var(--surface-sunken)]">
+                {t("sf.all")}
               </Link>
               {data.categories.map((c) => (
-                <Link key={c.id} href={`/s/${slug}?category=${c.slug}`} className="shrink-0 rounded-full px-3 py-1 muted hover:bg-[var(--surface-sunken)]">
+                <Link key={c.id} href={`/s/${slug}/products?category=${c.slug}`} className="shrink-0 rounded-full px-3 py-1 muted hover:bg-[var(--surface-sunken)]">
                   {c.name}
                 </Link>
               ))}
@@ -55,6 +59,7 @@ export default async function StoreLayout({ children, params }: { children: Reac
             {shop.name} · {t("brand.name")}
           </p>
         </footer>
+        {shop.assistant && <Assistant slug={slug} />}
       </CartProvider>
     </div>
   );

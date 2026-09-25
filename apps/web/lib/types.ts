@@ -5,6 +5,7 @@ export interface Variant {
   attributes: Record<string, string>;
   price: number;
   compareAtPrice: number | null;
+  priceUsdCents: number | null;
   stock: number;
   reserved: number;
   lowStockThreshold: number;
@@ -17,6 +18,8 @@ export interface Product {
   categoryId: string | null;
   images: string[];
   status: "draft" | "active" | "archived";
+  seoTitle: string | null;
+  seoDescription: string | null;
   variants: Variant[];
 }
 export interface Address {
@@ -120,6 +123,7 @@ export interface Appointment {
   channel: string;
   note: string | null;
   internalNote: string | null;
+  refundStatus: string | null;
   service: { name: string; color: string };
   staff: { name: string };
   customer: { name: string | null; phone: string | null; segment: string; noShowCount: number };

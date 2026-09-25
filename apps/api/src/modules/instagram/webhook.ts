@@ -15,7 +15,14 @@ interface IgWebhook {
       sender: { id: string };
       recipient: { id: string };
       timestamp?: number;
-      message?: { mid: string; text?: string; is_echo?: boolean; attachments?: { type: string; payload?: { url?: string } }[] };
+      message?: {
+        mid: string;
+        text?: string;
+        is_echo?: boolean;
+        is_deleted?: boolean;
+        attachments?: { type: string; payload?: { url?: string } }[];
+        reply_to?: { mid?: string; story?: { id: string; url?: string } };
+      };
     }[];
     changes?: { field: string; value: { id: string; text?: string; from?: { id: string; username?: string }; media?: { id: string } } }[];
   }[];
@@ -55,7 +62,7 @@ export const instagramWebhook =
         if (!shopId) continue;
 
         for (const m of entry.messaging ?? []) {
-          if (!m.message || m.message.is_echo) continue;
+          if (!m.message || m.message.is_echo || m.message.is_deleted) continue;
           await ctx.queues.add(
             "ig.message",
             {
@@ -64,6 +71,7 @@ export const instagramWebhook =
               mid: m.message.mid,
               text: m.message.text ?? "",
               attachments: m.message.attachments?.map((a) => ({ type: a.type, url: a.payload?.url })),
+              storyReplyId: m.message.reply_to?.story?.id,
             },
             { jobId: `igm-${m.message.mid}` },
           );

@@ -16,7 +16,7 @@ import {
   staff,
   staffServices,
 } from "@shopino/db";
-import { PAYMENT_METHODS, completeOrderSchema, createAppointmentSchema, createOrderSchema, rescheduleSchema, slotQuerySchema } from "@shopino/shared";
+import { PAYMENT_METHODS, planHas, completeOrderSchema, createAppointmentSchema, createOrderSchema, rescheduleSchema, slotQuerySchema } from "@shopino/shared";
 import type { Ctx } from "../../lib/context";
 import { TtlCache } from "../../lib/cache";
 import { safeEqual } from "../../lib/crypto";
@@ -25,6 +25,8 @@ import { saveUpload } from "../../lib/uploads";
 import { createOrder, getOrderFull, prepareCheckout } from "../orders/service";
 import { attachReceipt, startAppointmentPayment, startOrderPayment, handleGatewayCallback } from "../payments/service";
 import { bookAppointment, getSlots, rescheduleAppointment, transitionAppointment } from "../appointments/service";
+import { aiAvailable } from "../agent/llm";
+import { handleInbound } from "../inbox/pipeline";
 
 type ShopRow = typeof shops.$inferSelect;
 const shopBySlug = new TtlCache<ShopRow | null>(15_000);
@@ -38,7 +40,7 @@ export const storefrontRoutes =
         shop = (await ctx.db.query.shops.findFirst({ where: eq(shops.slug, slug) })) ?? null;
         shopBySlug.set(slug, shop);
       }
-      if (!shop) throw notFound("shop");
+      if (!shop || shop.suspendedAt) throw notFound("shop");
       return shop;
     }
 
@@ -65,6 +67,8 @@ export const storefrontRoutes =
           instagram: shop.igUsername,
           acceptsCardToCard: Boolean(settings.cardToCard.cardNumber),
           loyalty: settings.loyalty.enabled ? { pointValue: settings.loyalty.pointValue } : null,
+          landing: shop.landing,
+          assistant: settings.agent.consultOnWeb && planHas(shop.plan, "ai_consult") && aiAvailable(),
         },
         categories: cats,
         shippingMethods: methods.map((m) => ({ id: m.id, name: m.name, carrier: m.carrier, price: m.price, freeOver: m.freeOver })),
@@ -73,12 +77,45 @@ export const storefrontRoutes =
 
     app.get(
       "/shops/:slug/products",
-      { schema: { params: slugParams, querystring: z.object({ category: z.string().optional(), q: z.string().max(80).optional(), limit: z.coerce.number().int().max(60).default(30), offset: z.coerce.number().int().min(0).default(0) }) } },
+      {
+        schema: {
+          params: slugParams,
+          querystring: z
+            .object({
+              category: z.string().optional(),
+              q: z.string().max(80).optional(),
+              minPrice: z.coerce.number().int().min(0).optional(),
+              maxPrice: z.coerce.number().int().min(0).optional(),
+              inStock: z.coerce.boolean().optional(),
+              sort: z.enum(["new", "price_asc", "price_desc", "popular"]).default("new"),
+              limit: z.coerce.number().int().max(60).default(30),
+              offset: z.coerce.number().int().min(0).default(0),
+            })
+            .catchall(z.string()),
+        },
+      },
       async (req, reply) => {
         const shop = await shopOr404(req.params.slug);
-        const cat = req.query.category
-          ? await ctx.db.query.categories.findFirst({ where: and(eq(categories.shopId, shop.id), eq(categories.slug, req.query.category)) })
-          : undefined;
+        const { category, q, minPrice, maxPrice, inStock, sort, limit, offset, ...rest } = req.query;
+        // any other query key filters on a variant attribute: ?size=38&color=cream
+        const attrFilters = Object.entries(rest).filter(([k, v]) => /^[\p{L}\p{N}_ -]{1,40}$/u.test(k) && typeof v === "string" && v.length <= 60) as [string, string][];
+        const cat = category ? await ctx.db.query.categories.findFirst({ where: and(eq(categories.shopId, shop.id), eq(categories.slug, category)) }) : undefined;
+
+        const variantMatch = and(
+          eq(productVariants.productId, products.id),
+          inStock ? sql`${productVariants.stock} - ${productVariants.reserved} > 0` : undefined,
+          minPrice !== undefined ? sql`${productVariants.price} >= ${minPrice}` : undefined,
+          maxPrice !== undefined ? sql`${productVariants.price} <= ${maxPrice}` : undefined,
+          ...attrFilters.map(([k, v]) => sql`${productVariants.attributes} @> ${JSON.stringify({ [k]: v })}::jsonb`),
+        );
+        const orderBy =
+          sort === "price_asc"
+            ? sql`min(${productVariants.price}) asc`
+            : sort === "price_desc"
+              ? sql`min(${productVariants.price}) desc`
+              : sort === "popular"
+                ? sql`(select coalesce(sum(oi.quantity),0) from order_items oi where oi.product_id = ${products.id}) desc`
+                : sql`${products.createdAt} desc`;
         const rows = await ctx.db
           .select({
             id: products.id,
@@ -90,21 +127,77 @@ export const storefrontRoutes =
             available: sql<number>`sum(${productVariants.stock} - ${productVariants.reserved})::int`,
           })
           .from(products)
-          .innerJoin(productVariants, eq(productVariants.productId, products.id))
+          .innerJoin(productVariants, variantMatch)
           .where(
             and(
               eq(products.shopId, shop.id),
               eq(products.status, "active"),
               cat ? eq(products.categoryId, cat.id) : undefined,
-              req.query.q ? sql`${products.title} ILIKE ${"%" + req.query.q + "%"}` : undefined,
+              q ? sql`${products.title} ILIKE ${"%" + q + "%"}` : undefined,
             ),
           )
           .groupBy(products.id)
-          .orderBy(sql`${products.createdAt} desc`)
-          .limit(req.query.limit)
-          .offset(req.query.offset);
+          .orderBy(orderBy)
+          .limit(limit)
+          .offset(offset);
         reply.header("cache-control", "public, max-age=15, stale-while-revalidate=120");
         return { items: rows.map((r) => ({ ...r, minPrice: Number(r.minPrice), compareAt: r.compareAt ? Number(r.compareAt) : null })) };
+      },
+    );
+
+    // facets for the product listing page: attribute values and price range of what is on sale
+    app.get("/shops/:slug/facets", { schema: { params: slugParams } }, async (req, reply) => {
+      const shop = await shopOr404(req.params.slug);
+      const rows = await ctx.db
+        .select({ attributes: productVariants.attributes, price: productVariants.price })
+        .from(productVariants)
+        .innerJoin(products, eq(products.id, productVariants.productId))
+        .where(and(eq(products.shopId, shop.id), eq(products.status, "active")));
+      const attrs: Record<string, Set<string>> = {};
+      for (const r of rows) for (const [k, v] of Object.entries(r.attributes)) (attrs[k] ??= new Set()).add(v);
+      const prices = rows.map((r) => r.price);
+      reply.header("cache-control", "public, max-age=60");
+      return {
+        attributes: Object.fromEntries(Object.entries(attrs).map(([k, v]) => [k, [...v].sort((a, b) => a.localeCompare(b, "fa", { numeric: true }))])),
+        price: prices.length ? { min: Math.min(...prices), max: Math.max(...prices) } : null,
+      };
+    });
+
+    // AI shopping / booking consultant on the storefront and booking pages
+    app.post(
+      "/shops/:slug/assistant",
+      {
+        schema: {
+          params: slugParams,
+          body: z.object({
+            sessionId: z.string().regex(/^[A-Za-z0-9_-]{12,64}$/),
+            text: z.string().min(1).max(1000),
+            context: z.object({ productSlug: z.string().max(120).optional(), serviceId: z.string().uuid().optional() }).optional(),
+          }),
+        },
+        config: { rateLimit: { max: 15, timeWindow: "1 minute" } },
+      },
+      async (req) => {
+        const shop = await shopOr404(req.params.slug);
+        const settings = resolveShopSettings(shop.settings);
+        if (!(settings.agent.consultOnWeb && planHas(shop.plan, "ai_consult") && aiAvailable())) throw notFound("assistant");
+        let pageContext: string | undefined;
+        if (req.body.context?.productSlug) {
+          const p = await ctx.db.query.products.findFirst({ where: and(eq(products.shopId, shop.id), eq(products.slug, req.body.context.productSlug)) });
+          if (p) pageContext = `product "${p.title}" (use search_products to get its variants and stock)`;
+        } else if (req.body.context?.serviceId) {
+          const s = await ctx.db.query.services.findFirst({ where: and(eq(services.shopId, shop.id), eq(services.id, req.body.context.serviceId)) });
+          if (s) pageContext = `booking page for service "${s.name}" (serviceId ${s.id})`;
+        }
+        const r = await handleInbound(ctx.db, ctx.queues, ctx.redis, {
+          shopId: shop.id,
+          channel: "web",
+          externalUserId: `web-${req.body.sessionId}`,
+          username: "web visitor",
+          text: req.body.text,
+          pageContext,
+        });
+        return { reply: r.reply, handoff: Boolean(r.handoff) };
       },
     );
 

@@ -5,6 +5,7 @@ import type { PaymentProvider } from "./types";
 /** Development gateway: a local page lets you pick success or failure. */
 export const mockProvider: PaymentProvider = {
   name: "mock",
+  supportsSplit: false,
   async request(req) {
     const authority = `MOCK${randomToken(12)}`;
     const q = new URLSearchParams({ authority, amount: String(req.amount), callback: req.callbackUrl, description: req.description });

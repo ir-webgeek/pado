@@ -1,5 +1,6 @@
 import { and, eq, inArray, notInArray, sql } from "drizzle-orm";
-import { categories, inventoryMovements, productVariants, products, type DbOrTx } from "@shopino/db";
+import { categories, inventoryMovements, productVariants, products, resolveShopSettings, shops, type DbOrTx } from "@shopino/db";
+import { tomanFromUsd } from "../pricing/usd";
 import { PLANS, type ProductInput } from "@shopino/shared";
 import type { ShopCtx } from "../../lib/auth";
 import { badRequest, notFound, paymentRequired } from "../../lib/errors";
@@ -84,11 +85,17 @@ export async function upsertProduct(db: DbOrTx, shop: ShopCtx, input: ProductInp
     .delete(productVariants)
     .where(and(eq(productVariants.productId, id), keepIds.length ? notInArray(productVariants.id, keepIds) : sql`true`));
 
+  const shopRow = await db.query.shops.findFirst({ where: eq(shops.id, shop.id), columns: { settings: true } });
+  const pricing = resolveShopSettings(shopRow?.settings).pricing;
+  const usdOn = pricing.usdEnabled && pricing.usdRate > 0;
+
   for (const [position, v] of input.variants.entries()) {
     const data = {
       sku: v.sku || null,
       attributes: v.attributes,
-      price: v.price,
+      priceUsdCents: v.priceUsdCents ?? null,
+      // USD-linked variants take their Toman price from the current rate
+      price: usdOn && v.priceUsdCents ? tomanFromUsd(v.priceUsdCents, pricing.usdRate, pricing.markupPercent, pricing.roundTo) : v.price,
       compareAtPrice: v.compareAtPrice ?? null,
       lowStockThreshold: v.lowStockThreshold,
       position,

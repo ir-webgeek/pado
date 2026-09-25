@@ -1,14 +1,13 @@
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
 import { and, desc, eq, lt, sql } from "drizzle-orm";
 import { z } from "zod";
-import { commentRules, conversations, customers, messages, shops } from "@shopino/db";
-import { commentRuleInputSchema } from "@shopino/shared";
+import { conversations, customers, messages, shops } from "@shopino/db";
 import type { Ctx } from "../../lib/context";
 import { invalidateShopCache, requireFeature, requireShop } from "../../lib/auth";
 import { audit } from "../../lib/audit";
 import { badRequest, notFound } from "../../lib/errors";
 import { agentAvailable } from "../agent/agent";
-import { handleInbound, humanReply } from "./pipeline";
+import { handleInbound, humanReply, recentRuns } from "./pipeline";
 
 const params = z.object({ shopId: z.string().uuid() });
 const withId = params.extend({ id: z.string().uuid() });
@@ -48,7 +47,7 @@ export const inboxRoutes =
       if (!conv) throw notFound("conversation");
       const rows = await ctx.db.select().from(messages).where(eq(messages.conversationId, conv.id)).orderBy(desc(messages.createdAt)).limit(100);
       await ctx.db.update(conversations).set({ unread: 0 }).where(eq(conversations.id, conv.id));
-      return { conversation: conv, messages: rows.reverse() };
+      return { conversation: conv, messages: rows.reverse(), agentRuns: await recentRuns(ctx.db, conv.id) };
     });
 
     app.post(
@@ -75,13 +74,11 @@ export const inboxRoutes =
       },
     );
 
-    // try the agent from the panel without Instagram
+    // try the DM flow (automations, then AI when enabled) from the panel without Instagram
     app.post(
       "/:shopId/agent/playground",
       { preHandler: requireShop(ctx, "admin"), schema: { params, body: z.object({ text: z.string().min(1).max(1000), reset: z.boolean().default(false) }) }, config: { rateLimit: { max: 20, timeWindow: "1 minute" } } },
       async (req) => {
-        requireFeature(req.shop, "agent");
-        if (!agentAvailable()) throw badRequest("agent_not_configured", "ANTHROPIC_API_KEY is not set on the server");
         const externalUserId = `playground-${req.user.sub}`;
         if (req.body.reset) {
           await ctx.db.delete(conversations).where(and(eq(conversations.shopId, req.shop.id), eq(conversations.channel, "web"), eq(conversations.externalUserId, externalUserId)));
@@ -91,9 +88,7 @@ export const inboxRoutes =
           .update(conversations)
           .set({ mode: "agent" })
           .where(and(eq(conversations.shopId, req.shop.id), eq(conversations.channel, "web"), eq(conversations.externalUserId, externalUserId)));
-        const shopRow = await ctx.db.query.shops.findFirst({ where: eq(shops.id, req.shop.id), columns: { settings: true } });
-        if (!shopRow?.settings.agent?.enabled) throw badRequest("agent_disabled", "enable the agent in settings first");
-        return handleInbound(ctx.db, ctx.queues, { shopId: req.shop.id, channel: "web", externalUserId, username: "playground", text: req.body.text });
+        return handleInbound(ctx.db, ctx.queues, ctx.redis, { shopId: req.shop.id, channel: "web", externalUserId, username: "playground", text: req.body.text });
       },
     );
 
@@ -116,21 +111,4 @@ export const inboxRoutes =
       return { ok: true };
     });
 
-    // ---- comment-to-DM rules
-    app.get("/:shopId/comment-rules", { preHandler: requireShop(ctx), schema: { params } }, async (req) =>
-      ctx.db.select().from(commentRules).where(eq(commentRules.shopId, req.shop.id)).orderBy(desc(commentRules.createdAt)),
-    );
-    app.post("/:shopId/comment-rules", { preHandler: requireShop(ctx, "admin"), schema: { params, body: commentRuleInputSchema } }, async (req) => {
-      const [row] = await ctx.db.insert(commentRules).values({ ...req.body, shopId: req.shop.id }).returning();
-      return row;
-    });
-    app.put("/:shopId/comment-rules/:id", { preHandler: requireShop(ctx, "admin"), schema: { params: withId, body: commentRuleInputSchema } }, async (req) => {
-      const [row] = await ctx.db.update(commentRules).set(req.body).where(and(eq(commentRules.id, req.params.id), eq(commentRules.shopId, req.shop.id))).returning();
-      if (!row) throw notFound("rule");
-      return row;
-    });
-    app.delete("/:shopId/comment-rules/:id", { preHandler: requireShop(ctx, "admin"), schema: { params: withId } }, async (req) => {
-      await ctx.db.delete(commentRules).where(and(eq(commentRules.id, req.params.id), eq(commentRules.shopId, req.shop.id)));
-      return { ok: true };
-    });
   };

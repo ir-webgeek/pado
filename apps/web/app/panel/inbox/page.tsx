@@ -55,7 +55,7 @@ export default function InboxPage() {
       {filter === "playground" ? (
         <Playground />
       ) : (
-        <div className="grid gap-3 lg:grid-cols-[22rem_1fr]">
+        <div className="grid gap-3 lg:grid-cols-[22rem_minmax(0,1fr)]">
           <Card className={clsx("!p-2", active && "hidden lg:block")}>
             {!convs ? (
               <Spinner />
@@ -195,9 +195,10 @@ function Playground() {
     setBusy(true);
     setError(null);
     try {
-      const r = await api<{ reply: string | null; handoff: string | null }>(`/shops/${shop.id}/agent/playground`, { method: "POST", json: { text, reset } });
+      const r = await api<{ reply: string | null; handoff: string | null; automation?: { name: string } }>(`/shops/${shop.id}/agent/playground`, { method: "POST", json: { text, reset } });
       setMsgs((m) => [
         ...m,
+        ...(r.automation ? [{ direction: "out" as const, sender: "system" as const, text: `⚡ ${r.automation.name}`, createdAt: new Date().toISOString() }] : []),
         ...(r.reply ? [{ direction: "out" as const, sender: "agent" as const, text: r.reply, createdAt: new Date().toISOString() }] : []),
         ...(r.handoff ? [{ direction: "out" as const, sender: "system" as const, text: `⚑ handoff: ${r.handoff}`, createdAt: new Date().toISOString() }] : []),
       ]);

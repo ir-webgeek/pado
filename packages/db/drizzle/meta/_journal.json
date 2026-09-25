@@ -8,6 +8,27 @@
       "when": 1790293881166,
       "tag": "0000_init",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1790297612401,
+      "tag": "0001_v2",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1790297613289,
+      "tag": "0002_drop_comment_rules",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1790297784833,
+      "tag": "0003_settlement_iban",
+      "breakpoints": true
     }
   ]
 }

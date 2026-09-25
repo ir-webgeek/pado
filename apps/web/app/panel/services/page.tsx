@@ -355,7 +355,7 @@ function StaffEditor({ member, onClose, onSaved }: { member: Staff | null; onClo
             })}
           </div>
         </div>
-        <Toggle checked={active} onChange={setActive} label="Active" />
+        <Toggle checked={active} onChange={setActive} label={t("a.active")} />
         <ErrorNote error={error} />
         <div className="flex justify-end gap-2">
           <Button onClick={onClose}>{t("a.cancel")}</Button>
