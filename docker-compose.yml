@@ -1,0 +1,46 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: shopino
+      POSTGRES_PASSWORD: shopino
+      POSTGRES_DB: shopino
+    ports: ["5432:5432"]
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U shopino"]
+      interval: 5s
+      retries: 10
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "noeviction"]
+    ports: ["6379:6379"]
+    volumes: [redisdata:/data]
+  api:
+    build: { context: ., dockerfile: apps/api/Dockerfile }
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://shopino:shopino@postgres:5432/shopino
+      REDIS_URL: redis://redis:6379
+    ports: ["4000:4000"]
+    depends_on: [postgres, redis]
+    profiles: [app]
+  worker:
+    build: { context: ., dockerfile: apps/api/Dockerfile }
+    command: ["node", "apps/api/dist/worker.js"]
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://shopino:shopino@postgres:5432/shopino
+      REDIS_URL: redis://redis:6379
+    depends_on: [postgres, redis]
+    profiles: [app]
+  web:
+    build: { context: ., dockerfile: apps/web/Dockerfile }
+    environment:
+      API_INTERNAL_URL: http://api:4000
+    ports: ["3000:3000"]
+    depends_on: [api]
+    profiles: [app]
+volumes:
+  pgdata:
+  redisdata:
