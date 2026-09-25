@@ -1,0 +1,22 @@
+{
+  "name": "shopino",
+  "private": true,
+  "packageManager": "pnpm@10.33.0",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "dev": "turbo run dev --parallel",
+    "build": "turbo run build",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "lint": "turbo run typecheck",
+    "db:generate": "pnpm --filter @shopino/db generate",
+    "db:migrate": "pnpm --filter @shopino/db migrate",
+    "db:seed": "pnpm --filter @shopino/db seed",
+    "infra:up": "docker compose up -d postgres redis",
+    "infra:down": "docker compose down"
+  },
+  "devDependencies": {
+    "turbo": "^2.11.4",
+    "typescript": "^5.9.3"
+  }
+}

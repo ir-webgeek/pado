@@ -1,0 +1,14 @@
+import { config } from "dotenv";
+import { drizzle } from "drizzle-orm/postgres-js";
+import { migrate } from "drizzle-orm/postgres-js/migrator";
+import postgres from "postgres";
+
+config({ path: "../../.env" });
+
+const url = process.env.DATABASE_URL;
+if (!url) throw new Error("DATABASE_URL is not set");
+
+const client = postgres(url, { max: 1 });
+await migrate(drizzle(client), { migrationsFolder: new URL("../drizzle", import.meta.url).pathname });
+await client.end();
+console.log("migrations applied");

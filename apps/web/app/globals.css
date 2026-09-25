@@ -1,0 +1,151 @@
+@import "tailwindcss";
+
+/*
+ * Design tokens. "Night" (default) is inspired by a calm night sky: deep ink surfaces, glass panels,
+ * a warm sand-gold accent. "Day" keeps the same hierarchy on paper surfaces.
+ */
+@theme {
+  --font-sans: var(--font-vazirmatn), ui-sans-serif, system-ui, sans-serif;
+  --color-ink-950: #080d17;
+  --color-ink-900: #0d1424;
+  --color-ink-850: #11192a;
+  --color-ink-800: #18233a;
+  --color-ink-700: #243349;
+  --color-slate-brand: #415a77;
+  --color-sky-brand: #aebbd0;
+  --color-gold: #d9d0b8;
+  --color-gold-deep: #c4b894;
+  --color-success: #2dbf80;
+  --color-warning: #ef9736;
+  --color-danger: #f86d77;
+  --color-info: #52b4fd;
+  --radius-panel: 1.25rem;
+  --animate-twinkle: twinkle 4s ease-in-out infinite;
+  --animate-rise: rise 0.7s cubic-bezier(0.33, 0.62, 0.05, 1) both;
+  --animate-typing: typing 1.2s steps(3) infinite;
+  @keyframes twinkle {
+    0%, 100% { opacity: 0.25; }
+    50% { opacity: 1; }
+  }
+  @keyframes rise {
+    from { opacity: 0; transform: translateY(14px); }
+    to { opacity: 1; transform: none; }
+  }
+}
+
+:root {
+  --bg: #0b1120;
+  --bg-elev: #11192a;
+  --surface: rgb(24 35 58 / 0.72);
+  --surface-strong: #18233a;
+  --surface-sunken: rgb(174 187 208 / 0.06);
+  --border: rgb(255 255 255 / 0.09);
+  --border-strong: rgb(255 255 255 / 0.16);
+  --text: #f3f5f8;
+  --text-body: #d7deea;
+  --text-muted: #9aa7bc;
+  --accent: #d9d0b8;
+  --accent-ink: #11192a;
+  --accent-soft: rgb(217 208 184 / 0.14);
+  --ring: #aebbd0;
+  --shadow: 0 1px 2px #0000004d, 0 12px 32px -8px #00000080;
+  color-scheme: dark;
+}
+
+[data-theme="day"] {
+  --bg: #f6f7f9;
+  --bg-elev: #ffffff;
+  --surface: rgb(255 255 255 / 0.82);
+  --surface-strong: #ffffff;
+  --surface-sunken: rgb(27 38 59 / 0.04);
+  --border: rgb(27 38 59 / 0.1);
+  --border-strong: rgb(27 38 59 / 0.18);
+  --text: #11192a;
+  --text-body: #243349;
+  --text-muted: #5c6b84;
+  --accent: #1b263b;
+  --accent-ink: #f6f7f9;
+  --accent-soft: rgb(27 38 59 / 0.08);
+  --ring: #415a77;
+  --shadow: 0 1px 2px #1b263b14, 0 12px 32px -12px #1b263b33;
+  color-scheme: light;
+}
+
+html {
+  background: var(--bg);
+  color: var(--text-body);
+  -webkit-font-smoothing: antialiased;
+}
+body {
+  min-height: 100dvh;
+  font-feature-settings: "ss01";
+}
+::selection {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+@layer components {
+  .glass {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    backdrop-filter: blur(24px) saturate(160%);
+    -webkit-backdrop-filter: blur(24px) saturate(160%);
+    box-shadow: var(--shadow);
+  }
+  .card {
+    background: var(--surface-strong);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-panel);
+  }
+  .muted {
+    color: var(--text-muted);
+  }
+  .strong {
+    color: var(--text);
+  }
+  .num {
+    font-variant-numeric: tabular-nums;
+  }
+  .night-sky {
+    background:
+      radial-gradient(1200px 600px at 50% -10%, rgb(65 90 119 / 0.45), transparent 70%),
+      radial-gradient(800px 400px at 85% 10%, rgb(217 208 184 / 0.08), transparent 70%),
+      linear-gradient(180deg, #0b1120 0%, #0d1628 60%, #0b1120 100%);
+  }
+  [data-theme="day"] .night-sky {
+    background:
+      radial-gradient(1200px 600px at 50% -10%, rgb(174 187 208 / 0.55), transparent 70%),
+      linear-gradient(180deg, #eef1f6 0%, #f6f7f9 100%);
+  }
+  .input {
+    width: 100%;
+    border-radius: 0.8rem;
+    border: 1px solid var(--border-strong);
+    background: var(--surface-sunken);
+    color: var(--text);
+    padding: 0.6rem 0.85rem;
+    font-size: 0.925rem;
+    transition: border-color 0.15s;
+  }
+  .input:focus {
+    border-color: var(--ring);
+    outline: none;
+  }
+  .input::placeholder {
+    color: var(--text-muted);
+  }
+  .label {
+    display: block;
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    margin-bottom: 0.35rem;
+  }
+  .scroll-thin {
+    scrollbar-width: thin;
+  }
+}
