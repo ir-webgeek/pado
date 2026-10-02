@@ -183,7 +183,8 @@ export function Empty({ icon, title, children }: { icon?: ReactNode; title: stri
   );
 }
 
-export function Avatar({ name, color, size = 36 }: { name?: string | null; color?: string; size?: number }) {
+export function Avatar({ name, color, size = 36, src }: { name?: string | null; color?: string; size?: number; src?: string | null }) {
+  if (src) return <img src={src} alt={name ?? ""} className="shrink-0 rounded-full object-cover" style={{ width: size, height: size }} />;
   const ch = (name ?? "?").trim().charAt(0) || "?";
   return (
     <span

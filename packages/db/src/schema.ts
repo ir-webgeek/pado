@@ -528,6 +528,12 @@ export interface DepositRule {
   value: number;
 }
 
+export interface BeforeAfter {
+  before: string;
+  after: string;
+  caption?: string;
+}
+
 export const services = pgTable(
   "services",
   {
@@ -546,7 +552,12 @@ export const services = pgTable(
     onlineBookable: boolean().notNull().default(true),
     requiresApproval: boolean().notNull().default(false),
     color: text().notNull().default("#aebbd0"),
+    /** square avatar shown on service cards */
     image: text(),
+    /** wide cover shown at the top of the service page */
+    banner: text(),
+    gallery: jsonb().$type<string[]>().notNull().default([]),
+    beforeAfter: jsonb().$type<BeforeAfter[]>().notNull().default([]),
     active: boolean().notNull().default(true),
     sort: integer().notNull().default(0),
     createdAt: createdAt(),

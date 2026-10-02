@@ -1,16 +1,17 @@
 "use client";
 
 import clsx from "clsx";
-import { Clock, Plus, Trash2, UserPlus, Users } from "lucide-react";
+import { Clock, Plus, Trash2, UserPlus, Users, X } from "lucide-react";
 import { useState } from "react";
 import { hhmmToMinutes, minutesToHHMM } from "@shopino/shared";
 import { Avatar, Badge, Button, Card, Empty, ErrorNote, Field, Input, Modal, PageHeader, Select, Spinner, Tabs, Textarea, Toggle } from "@/components/ui";
+import { UploadButton } from "@/components/upload";
 import { api, useApi } from "@/lib/api";
 import { latinDigits, money, num } from "@/lib/format";
 import type { DictKey } from "@/lib/i18n";
 import { useI18n } from "@/lib/locale-client";
 import { useShop } from "@/lib/shop";
-import type { Hours, Service, Staff } from "@/lib/types";
+import type { BeforeAfter, Hours, Service, Staff } from "@/lib/types";
 
 const COLORS = ["#d9d0b8", "#c4b894", "#aebbd0", "#778da9", "#52b4fd", "#2dbf80", "#ef9736", "#f86d77"];
 // Iranian week order: Saturday first
@@ -65,7 +66,7 @@ export default function ServicesPage() {
               .filter((s) => s.active)
               .map((s) => (
                 <button key={s.id} onClick={() => setEditService(s)} className="card flex gap-3 p-4 text-start transition hover:border-gold/40">
-                  <span className="w-1.5 shrink-0 rounded-full" style={{ background: s.color }} />
+                  {s.image ? <Avatar src={s.image} name={s.name} size={44} /> : <span className="w-1.5 shrink-0 rounded-full" style={{ background: s.color }} />}
                   <span className="min-w-0 flex-1 space-y-2">
                     <span className="flex items-start justify-between gap-2">
                       <span className="font-semibold strong">{s.name}</span>
@@ -112,7 +113,7 @@ export default function ServicesPage() {
           {staff.map((s) => (
             <button key={s.id} onClick={() => setEditStaff(s)} className={clsx("card p-4 text-start transition hover:border-gold/40", !s.active && "opacity-50")}>
               <div className="flex items-center gap-3">
-                <Avatar name={s.name} color={s.color} size={42} />
+                <Avatar name={s.name} color={s.color} src={s.avatar} size={42} />
                 <div>
                   <p className="font-semibold strong">{s.name}</p>
                   <p className="text-xs muted">{s.title}</p>
@@ -160,6 +161,12 @@ function ServiceEditor({ service, staff, onClose, onSaved }: { service: Service 
     color: service?.color ?? COLORS[0]!,
     staffIds: service?.staffIds ?? staff.map((s) => s.id),
   });
+  const [media, setMedia] = useState<{ image: string | null; banner: string | null; gallery: string[]; beforeAfter: BeforeAfter[] }>({
+    image: service?.image ?? null,
+    banner: service?.banner ?? null,
+    gallery: service?.gallery ?? [],
+    beforeAfter: service?.beforeAfter ?? [],
+  });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const n = (s: string) => Number(latinDigits(s) || 0);
@@ -182,6 +189,8 @@ function ServiceEditor({ service, staff, onClose, onSaved }: { service: Service 
       requiresApproval: f.requiresApproval,
       color: f.color,
       staffIds: f.staffIds,
+      ...media,
+      beforeAfter: media.beforeAfter.filter((p) => p.before && p.after).map((p) => ({ ...p, caption: p.caption || undefined })),
     };
     try {
       if (service) await api(`/shops/${shop.id}/services/${service.id}`, { method: "PUT", json: body });
@@ -257,6 +266,7 @@ function ServiceEditor({ service, staff, onClose, onSaved }: { service: Service 
             <button key={c} onClick={() => set("color", c)} className={clsx("size-7 rounded-full", f.color === c && "ring-2 ring-[var(--ring)] ring-offset-2 ring-offset-[var(--bg-elev)]")} style={{ background: c }} />
           ))}
         </div>
+        <ServiceMediaEditor value={media} onChange={setMedia} />
         <div className="rounded-xl bg-[var(--surface-sunken)] px-3 py-1">
           <Toggle checked={f.onlineBookable} onChange={(v) => set("onlineBookable", v)} label={t("sv.online")} />
           <Toggle checked={f.requiresApproval} onChange={(v) => set("requiresApproval", v)} label={t("sv.approval")} />
@@ -283,6 +293,76 @@ function ServiceEditor({ service, staff, onClose, onSaved }: { service: Service 
   );
 }
 
+type ServiceMedia = { image: string | null; banner: string | null; gallery: string[]; beforeAfter: BeforeAfter[] };
+
+function Thumb({ src, onRemove, className }: { src: string; onRemove: () => void; className?: string }) {
+  const { t } = useI18n();
+  return (
+    <span className={clsx("relative inline-block overflow-hidden rounded-xl bg-[var(--surface-sunken)]", className ?? "size-20")}>
+      <img src={src} alt="" className="size-full object-cover" />
+      <button type="button" onClick={onRemove} aria-label={t("sv.remove")} className="absolute end-1 top-1 rounded-full bg-black/60 p-0.5 text-white">
+        <X className="size-3.5" />
+      </button>
+    </span>
+  );
+}
+
+function ServiceMediaEditor({ value, onChange }: { value: ServiceMedia; onChange: (v: ServiceMedia) => void }) {
+  const { t } = useI18n();
+  const set = (patch: Partial<ServiceMedia>) => onChange({ ...value, ...patch });
+  const setPair = (i: number, patch: Partial<BeforeAfter>) => set({ beforeAfter: value.beforeAfter.map((p, j) => (j === i ? { ...p, ...patch } : p)) });
+  return (
+    <div className="space-y-4 rounded-xl border border-[var(--border)] p-3">
+      <p className="text-sm font-semibold strong">{t("sv.media")}</p>
+      <div className="grid gap-4 sm:grid-cols-[auto_1fr]">
+        <div>
+          <p className="label">{t("sv.avatar")}</p>
+          {value.image ? <Thumb src={value.image} onRemove={() => set({ image: null })} /> : <UploadButton label={t("sv.upload")} onUploaded={(url) => set({ image: url })} />}
+        </div>
+        <div>
+          <p className="label">{t("sv.banner")}</p>
+          {value.banner ? (
+            <Thumb src={value.banner} onRemove={() => set({ banner: null })} className="aspect-[21/9] w-full max-w-sm" />
+          ) : (
+            <UploadButton label={t("sv.upload")} onUploaded={(url) => set({ banner: url })} />
+          )}
+        </div>
+      </div>
+      <div>
+        <p className="label">{t("sv.gallery")}</p>
+        <div className="flex flex-wrap items-center gap-2">
+          {value.gallery.map((src) => (
+            <Thumb key={src} src={src} onRemove={() => set({ gallery: value.gallery.filter((g) => g !== src) })} />
+          ))}
+          {value.gallery.length < 12 && <UploadButton label={t("sv.upload")} onUploaded={(url) => set({ gallery: [...value.gallery, url] })} />}
+        </div>
+      </div>
+      <div className="space-y-2">
+        <p className="label">{t("sv.beforeAfter")}</p>
+        {value.beforeAfter.map((p, i) => (
+          <div key={i} className="flex flex-wrap items-end gap-3 rounded-xl bg-[var(--surface-sunken)] p-2">
+            {(["before", "after"] as const).map((side) => (
+              <div key={side}>
+                <p className="mb-1 text-[11px] muted">{t(side === "before" ? "sv.before" : "sv.after")}</p>
+                {p[side] ? <Thumb src={p[side]} onRemove={() => setPair(i, { [side]: "" })} /> : <UploadButton label={t("sv.upload")} onUploaded={(url) => setPair(i, { [side]: url })} />}
+              </div>
+            ))}
+            <Input className="min-w-40 flex-1" placeholder={t("sv.caption")} maxLength={140} value={p.caption ?? ""} onChange={(e) => setPair(i, { caption: e.target.value })} />
+            <Button size="sm" variant="ghost" onClick={() => set({ beforeAfter: value.beforeAfter.filter((_, j) => j !== i) })} aria-label={t("sv.remove")}>
+              <Trash2 className="size-4" />
+            </Button>
+          </div>
+        ))}
+        {value.beforeAfter.length < 12 && (
+          <Button size="sm" onClick={() => set({ beforeAfter: [...value.beforeAfter, { before: "", after: "" }] })}>
+            <Plus className="size-4" /> {t("sv.addPair")}
+          </Button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function StaffEditor({ member, onClose, onSaved }: { member: Staff | null; onClose: () => void; onSaved: () => void }) {
   const { t } = useI18n();
   const { shop } = useShop();
@@ -290,6 +370,7 @@ function StaffEditor({ member, onClose, onSaved }: { member: Staff | null; onClo
   const [title, setTitle] = useState(member?.title ?? "");
   const [color, setColor] = useState(member?.color ?? COLORS[1]!);
   const [active, setActive] = useState(member?.active ?? true);
+  const [avatar, setAvatar] = useState<string | null>(member?.avatar ?? null);
   const [hours, setHours] = useState<Hours[]>(
     member?.workingHours ?? [6, 0, 1, 2, 3].flatMap((wd) => [{ weekday: wd, startMin: 600, endMin: 1200 }]),
   );
@@ -301,7 +382,7 @@ function StaffEditor({ member, onClose, onSaved }: { member: Staff | null; onClo
   async function save() {
     setBusy(true);
     setError(null);
-    const body = { name, title, color, active, workingHours: hours.filter((h) => h.endMin > h.startMin) };
+    const body = { name, title, color, active, avatar, workingHours: hours.filter((h) => h.endMin > h.startMin) };
     try {
       if (member) await api(`/shops/${shop.id}/staff/${member.id}`, { method: "PUT", json: body });
       else await api(`/shops/${shop.id}/staff`, { method: "POST", json: body });
@@ -322,6 +403,10 @@ function StaffEditor({ member, onClose, onSaved }: { member: Staff | null; onClo
           <Field label={t("st.title")}>
             <Input value={title} onChange={(e) => setTitle(e.target.value)} />
           </Field>
+        </div>
+        <div className="flex items-center gap-3">
+          <span className="label !mb-0">{t("sv.avatar")}</span>
+          {avatar ? <Thumb src={avatar} onRemove={() => setAvatar(null)} className="size-14 !rounded-full" /> : <UploadButton label={t("sv.upload")} onUploaded={setAvatar} />}
         </div>
         <div className="flex gap-2">
           {COLORS.map((c) => (

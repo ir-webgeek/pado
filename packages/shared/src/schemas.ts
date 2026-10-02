@@ -156,6 +156,8 @@ export const discountInputSchema = z.object({
 });
 
 // ---------- appointments ----------
+const mediaUrl = z.string().url().max(500).refine((u) => /^https?:\/\//.test(u), "http(s) url required");
+
 export const serviceInputSchema = z.object({
   name: z.string().min(1).max(120),
   description: z.string().max(2000).default(""),
@@ -172,7 +174,10 @@ export const serviceInputSchema = z.object({
   onlineBookable: z.boolean().default(true),
   requiresApproval: z.boolean().default(false),
   color: z.string().regex(/^#[0-9a-fA-F]{6}$/).default("#aebbd0"),
-  image: z.string().optional(),
+  image: mediaUrl.nullable().optional(),
+  banner: mediaUrl.nullable().optional(),
+  gallery: z.array(mediaUrl).max(12).optional(),
+  beforeAfter: z.array(z.object({ before: mediaUrl, after: mediaUrl, caption: z.string().max(140).optional() })).max(12).optional(),
   active: z.boolean().default(true),
   staffIds: z.array(z.string().uuid()).default([]),
 });
@@ -192,7 +197,7 @@ export const staffInputSchema = z.object({
   name: z.string().min(1).max(80),
   title: z.string().max(80).default(""),
   phone: z.string().max(20).optional(),
-  avatar: z.string().optional(),
+  avatar: mediaUrl.nullable().optional(),
   color: z.string().regex(/^#[0-9a-fA-F]{6}$/).default("#d9d0b8"),
   memberId: z.string().uuid().nullable().optional(),
   active: z.boolean().default(true),

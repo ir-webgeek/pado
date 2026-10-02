@@ -92,8 +92,17 @@ export interface Service {
   onlineBookable: boolean;
   requiresApproval: boolean;
   color: string;
+  image: string | null;
+  banner: string | null;
+  gallery: string[];
+  beforeAfter: BeforeAfter[];
   active: boolean;
   staffIds: string[];
+}
+export interface BeforeAfter {
+  before: string;
+  after: string;
+  caption?: string;
 }
 export interface Hours {
   weekday: number;
@@ -105,6 +114,7 @@ export interface Staff {
   name: string;
   title: string;
   color: string;
+  avatar: string | null;
   active: boolean;
   phone: string | null;
   workingHours: Hours[];

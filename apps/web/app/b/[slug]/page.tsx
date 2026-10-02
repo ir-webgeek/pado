@@ -12,14 +12,30 @@ import { LangToggle } from "@/components/prefs";
 import { api, useApi } from "@/lib/api";
 import { latinDigits, money, num, time } from "@/lib/format";
 import { useI18n } from "@/lib/locale-client";
-import type { DaySlots } from "@/lib/types";
+import { ServiceShowcase } from "@/components/service-media";
+import type { BeforeAfter, DaySlots } from "@/lib/types";
 
 interface ShopResp {
   shop: { name: string; brandColor: string; timezone: string; kind: string; assistant: boolean };
 }
 interface ServicesResp {
-  services: { id: string; name: string; description: string; durationMin: number; price: number; priceFrom: boolean; deposit: { type: string; value: number }; capacity: number; color: string; staffIds: string[] }[];
-  staff: { id: string; name: string; title: string; color: string }[];
+  services: {
+    id: string;
+    name: string;
+    description: string;
+    durationMin: number;
+    price: number;
+    priceFrom: boolean;
+    deposit: { type: string; value: number };
+    capacity: number;
+    color: string;
+    image: string | null;
+    banner: string | null;
+    gallery: string[];
+    beforeAfter: BeforeAfter[];
+    staffIds: string[];
+  }[];
+  staff: { id: string; name: string; title: string; color: string; avatar: string | null }[];
 }
 
 export default function BookingWizard({ params }: { params: Promise<{ slug: string }> }) {
@@ -97,9 +113,10 @@ export default function BookingWizard({ params }: { params: Promise<{ slug: stri
                 onClick={() => (setServiceId(s.id), setStaffId(""), setSlot(null), setStep(1))}
                 className="card flex w-full items-center gap-4 p-4 text-start transition hover:border-[var(--accent)]"
               >
-                <span className="h-12 w-1.5 rounded-full" style={{ background: s.color }} />
-                <span className="flex-1">
+                {s.image ? <Avatar src={s.image} name={s.name} size={52} /> : <span className="h-12 w-1.5 rounded-full" style={{ background: s.color }} />}
+                <span className="min-w-0 flex-1">
                   <span className="block font-semibold strong">{s.name}</span>
+                  {s.description && <span className="mt-0.5 line-clamp-2 block text-xs muted">{s.description}</span>}
                   <span className="mt-1 flex flex-wrap gap-3 text-xs muted">
                     <span className="inline-flex items-center gap-1"><Clock className="size-3" /> {num(s.durationMin, locale)} {t("ap.minutes")}</span>
                     {s.capacity > 1 && <span className="inline-flex items-center gap-1"><Users className="size-3" /> {num(s.capacity, locale)}</span>}
@@ -118,15 +135,16 @@ export default function BookingWizard({ params }: { params: Promise<{ slug: stri
             <button className="flex items-center gap-1 text-sm muted" onClick={() => setStep(0)}>
               <Back className="size-4" /> {service?.name}
             </button>
+            {service && <ServiceShowcase service={service} />}
             {staffForService.length > 1 && (
               <div className="flex gap-2 overflow-x-auto pb-1">
-                {[{ id: "", name: t("ap.anyStaff"), color: "#aebbd0", title: "" }, ...staffForService].map((s) => (
+                {[{ id: "", name: t("ap.anyStaff"), color: "#aebbd0", title: "", avatar: null }, ...staffForService].map((s) => (
                   <button
                     key={s.id || "any"}
                     onClick={() => (setStaffId(s.id), setSlot(null))}
                     className={clsx("flex shrink-0 items-center gap-2 rounded-full border py-1 pe-3 ps-1 text-sm", staffId === s.id ? "border-[var(--accent)] strong" : "border-[var(--border)] muted")}
                   >
-                    <Avatar name={s.name} color={s.color} size={28} /> {s.name}
+                    <Avatar name={s.name} color={s.color} src={s.avatar} size={28} /> {s.name}
                   </button>
                 ))}
               </div>

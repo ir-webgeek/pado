@@ -36,6 +36,13 @@
       "when": 1790970543430,
       "tag": "0004_customer_wallet",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1790971135225,
+      "tag": "0005_service_media",
+      "breakpoints": true
     }
   ]
 }
