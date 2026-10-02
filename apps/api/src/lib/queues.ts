@@ -19,6 +19,7 @@ export interface JobPayloads {
   "notify.wallet-refund": { appointmentId: string };
   "campaign.send": { campaignId: string };
   "pricing.refresh-usd": Record<string, never>;
+  "instagram.refresh-tokens": Record<string, never>;
   "instagram.analyze": { shopId: string; mediaRowIds: string[] };
   // inbound
   "ig.message": { shopId: string; igsid: string; mid: string; text: string; attachments?: { type: string; url?: string }[]; storyReplyId?: string };
@@ -39,6 +40,7 @@ const queueOf: Record<JobName, keyof typeof QUEUE_NAMES> = {
   "notify.wallet-refund": "events",
   "campaign.send": "events",
   "pricing.refresh-usd": "scheduled",
+  "instagram.refresh-tokens": "scheduled",
   "instagram.analyze": "inbound",
   "ig.message": "inbound",
   "ig.comment": "inbound",

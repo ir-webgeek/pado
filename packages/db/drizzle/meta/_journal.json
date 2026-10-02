@@ -57,6 +57,13 @@
       "when": 1790971716537,
       "tag": "0007_expenses",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1790973163942,
+      "tag": "0008_ig_token_expiry",
+      "breakpoints": true
     }
   ]
 }

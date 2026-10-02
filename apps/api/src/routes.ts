@@ -12,6 +12,7 @@ import { customerRoutes } from "./modules/customers/routes";
 import { discountRoutes } from "./modules/discounts/routes";
 import { inboxRoutes } from "./modules/inbox/routes";
 import { instagramWebhook } from "./modules/instagram/webhook";
+import { instagramOAuthCallbackRoutes, instagramOAuthStartRoutes } from "./modules/instagram/oauth-routes";
 import { inventoryRoutes } from "./modules/inventory/routes";
 import { financeRoutes } from "./modules/finance/routes";
 import { orderRoutes } from "./modules/orders/routes";
@@ -60,6 +61,7 @@ export const routes =
       formRoutes,
       knowledgeRoutes,
       instagramImportRoutes,
+      instagramOAuthStartRoutes,
       landingRoutes,
     ]) {
       await app.register(r(ctx), { prefix: "/shops" });
@@ -70,4 +72,5 @@ export const routes =
     await app.register(adminRoutes(ctx), { prefix: "/admin" });
     await app.register(payCallbackRoutes(ctx), { prefix: "/pay" });
     await app.register(instagramWebhook(ctx), { prefix: "/webhooks" });
+    await app.register(instagramOAuthCallbackRoutes(ctx), { prefix: "/instagram" });
   };

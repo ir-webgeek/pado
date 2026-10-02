@@ -20,6 +20,7 @@ import {
 import { expireOrderIfDue } from "./modules/orders/service";
 import { refreshUsdRateFromSource } from "./modules/pricing/service";
 import { analyzeMedia } from "./modules/instagram/importer";
+import { refreshInstagramTokens } from "./modules/instagram/token-refresh";
 
 const { db, client } = createDb(env.DATABASE_URL, { max: 10 });
 const connection = createRedis({ forWorker: true });
@@ -67,6 +68,7 @@ const handlers: Handlers = {
   "ig.comment": (d) => handleComment(db, redis, d),
   "pricing.refresh-usd": () => refreshUsdRateFromSource(db),
   "instagram.analyze": ({ shopId, mediaRowIds }) => analyzeMedia(db, shopId, mediaRowIds),
+  "instagram.refresh-tokens": () => refreshInstagramTokens(db),
 };
 
 const process = (job: Job) => {
@@ -91,6 +93,9 @@ await queues.queues.scheduled.upsertJobScheduler(
   { pattern: "30 3 * * *", tz: "Asia/Tehran" },
   { name: "customers.recompute-segments", data: {} },
 );
+
+// long-lived Instagram tokens expire after 60 days unless refreshed
+await queues.queues.scheduled.upsertJobScheduler("ig-token-refresh", { pattern: "15 4 * * *", tz: "Asia/Tehran" }, { name: "instagram.refresh-tokens", data: {} });
 
 if (env.USD_RATE_URL) {
   await queues.queues.scheduled.upsertJobScheduler("usd-rate", { every: 60 * 60_000 }, { name: "pricing.refresh-usd", data: {} });

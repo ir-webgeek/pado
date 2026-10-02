@@ -5,7 +5,8 @@ import { useEffect, useState } from "react";
 import { Button, Card, ErrorNote, Field, Input, PageHeader, Select, Spinner, Tabs, Textarea, Toggle } from "@/components/ui";
 import { UploadButton } from "@/components/upload";
 import { api, useApi } from "@/lib/api";
-import { dateTime, latinDigits, money } from "@/lib/format";
+import { date, dateTime, latinDigits, money } from "@/lib/format";
+import type { DictKey } from "@/lib/i18n";
 import { useI18n } from "@/lib/locale-client";
 import { useShop } from "@/lib/shop";
 
@@ -29,7 +30,7 @@ interface Settings {
   pricing: { usdEnabled: boolean; usdRate: number; markupPercent: number; roundTo: number; rateUpdatedAt: string | null; autoFetch: boolean };
 }
 interface ShopResp {
-  shop: { id: string; name: string; kind: string; brandColor: string; logo: string | null; timezone: string; telegramChatId: string | null; settlementIban: string | null; igUsername: string | null; instagramConnected: boolean; walletBalance: number; settings: Settings };
+  shop: { id: string; name: string; kind: string; brandColor: string; logo: string | null; timezone: string; telegramChatId: string | null; settlementIban: string | null; igUsername: string | null; instagramConnected: boolean; instagramOAuth: boolean; igTokenExpiresAt: string | null; walletBalance: number; settings: Settings };
 }
 
 const TABS = ["general", "agent", "booking", "loyalty", "payments", "pricing", "integrations", "wallet"] as const;
@@ -308,11 +309,10 @@ function SettingsForm({ tab, data, onSaved }: { tab: Tab; data: ShopResp; onSave
           <Field label={t("s.telegram")}>
             <Input dir="ltr" value={telegram} onChange={(e) => setTelegram(e.target.value)} />
           </Field>
-          <div className="rounded-xl border border-[var(--border)] p-3">
-            <p className="mb-3 text-sm font-semibold strong">
-              {t("s.igConnect")} {data.shop.instagramConnected && <span className="text-success">✓ {data.shop.igUsername}</span>}
-            </p>
-            <div className="grid gap-3 sm:grid-cols-2">
+          <InstagramConnect shop={data.shop} onChanged={onSaved} />
+          <details className="rounded-xl border border-[var(--border)] p-3">
+            <summary className="cursor-pointer text-sm muted">{t("ig.manualToken")}</summary>
+            <div className="mt-3 grid gap-3 sm:grid-cols-2">
               <Field label={t("s.igId")}>
                 <Input dir="ltr" value={ig.igUserId} onChange={(e) => setIg({ ...ig, igUserId: e.target.value })} />
               </Field>
@@ -323,7 +323,7 @@ function SettingsForm({ tab, data, onSaved }: { tab: Tab; data: ShopResp; onSave
             <Field label={t("s.igToken")} className="mt-3">
               <Input dir="ltr" type="password" value={ig.accessToken} onChange={(e) => setIg({ ...ig, accessToken: e.target.value })} />
             </Field>
-          </div>
+          </details>
         </>
       )}
       <ErrorNote error={error} />
@@ -338,6 +338,67 @@ function SettingsForm({ tab, data, onSaved }: { tab: Tab; data: ShopResp; onSave
         </Button>
       </div>
     </Card>
+  );
+}
+
+function InstagramConnect({ shop: s, onChanged }: { shop: ShopResp["shop"]; onChanged: () => void }) {
+  const { t, locale } = useI18n();
+  const { shop } = useShop();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<unknown>(null);
+  const [result, setResult] = useState<string | null>(null);
+  useEffect(() => {
+    // the OAuth callback lands back here with ?ig=connected|denied|error&reason=...
+    const q = new URLSearchParams(window.location.search);
+    const ig = q.get("ig");
+    if (ig) setResult(ig === "error" ? `error.${q.get("reason") ?? "exchange"}` : ig);
+  }, []);
+  const connect = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const r = await api<{ url: string }>(`/shops/${shop.id}/instagram/oauth/start`, { method: "POST" });
+      window.location.href = r.url;
+    } catch (e) {
+      setError(e);
+      setBusy(false);
+    }
+  };
+  const disconnect = async () => {
+    if (!confirm(`${t("ig.disconnect")}?`)) return;
+    await api(`/shops/${shop.id}/instagram/disconnect`, { method: "POST" });
+    onChanged();
+  };
+  return (
+    <div className="space-y-3 rounded-xl border border-[var(--border)] p-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <p className="text-sm font-semibold strong">{t("s.igConnect")}</p>
+          {s.instagramConnected ? (
+            <p className="mt-1 text-sm text-success">
+              ✓ @{s.igUsername}
+              {s.igTokenExpiresAt && <span className="text-xs muted"> · {t("ig.renews")} {date(s.igTokenExpiresAt, locale)}</span>}
+            </p>
+          ) : (
+            <p className="mt-1 text-xs muted">{t("ig.why")}</p>
+          )}
+        </div>
+        {s.instagramConnected ? (
+          <Button size="sm" variant="ghost" onClick={disconnect}>{t("ig.disconnect")}</Button>
+        ) : (
+          <Button variant="primary" loading={busy} disabled={!s.instagramOAuth} onClick={connect}>
+            {t("ig.connectBtn")}
+          </Button>
+        )}
+      </div>
+      {!s.instagramOAuth && !s.instagramConnected && <p className="text-xs text-warning">{t("ig.notConfigured")}</p>}
+      {result && (
+        <p className={result === "connected" ? "rounded-lg bg-success/10 px-3 py-2 text-sm text-success" : "rounded-lg bg-danger/10 px-3 py-2 text-sm text-danger"}>
+          {t(`ig.result.${result}` as DictKey)}
+        </p>
+      )}
+      <ErrorNote error={error} />
+    </div>
   );
 }
 

@@ -18,6 +18,7 @@ import {
 import { MEMBER_ROLES, PLANS, createShopSchema, normalizeIranPhone, updateShopSettingsSchema } from "@shopino/shared";
 import type { Ctx } from "../../lib/context";
 import { authenticate, invalidateShopCache, requireShop } from "../../lib/auth";
+import { instagramOAuthConfigured } from "../instagram/oauth";
 import { audit } from "../../lib/audit";
 import { badRequest, conflict, notFound } from "../../lib/errors";
 
@@ -67,7 +68,7 @@ export const shopRoutes =
       if (!shop) throw notFound("shop");
       const { igAccessToken, ...rest } = shop;
       return {
-        shop: { ...rest, settings: resolveShopSettings(shop.settings), instagramConnected: Boolean(igAccessToken) },
+        shop: { ...rest, settings: resolveShopSettings(shop.settings), instagramConnected: Boolean(igAccessToken), instagramOAuth: instagramOAuthConfigured() },
         role: req.shop.role,
         plan: PLANS[shop.plan],
       };

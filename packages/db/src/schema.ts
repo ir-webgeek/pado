@@ -201,6 +201,8 @@ export const shops = pgTable(
     igUserId: text().unique(),
     igUsername: text(),
     igAccessToken: text(),
+    /** long-lived Instagram tokens last 60 days; a daily job refreshes them before this */
+    igTokenExpiresAt: timestamp({ withTimezone: true }),
     telegramChatId: text(),
     /** merchant Sheba (IR...) that receives the shop's share when split payments go live */
     settlementIban: text(),
