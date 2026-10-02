@@ -3,6 +3,7 @@
 import { Check, Wallet } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Button, Card, ErrorNote, Field, Input, PageHeader, Select, Spinner, Tabs, Textarea, Toggle } from "@/components/ui";
+import { UploadButton } from "@/components/upload";
 import { api, useApi } from "@/lib/api";
 import { dateTime, latinDigits, money } from "@/lib/format";
 import { useI18n } from "@/lib/locale-client";
@@ -28,16 +29,22 @@ interface Settings {
   pricing: { usdEnabled: boolean; usdRate: number; markupPercent: number; roundTo: number; rateUpdatedAt: string | null; autoFetch: boolean };
 }
 interface ShopResp {
-  shop: { id: string; name: string; kind: string; brandColor: string; timezone: string; telegramChatId: string | null; settlementIban: string | null; igUsername: string | null; instagramConnected: boolean; walletBalance: number; settings: Settings };
+  shop: { id: string; name: string; kind: string; brandColor: string; logo: string | null; timezone: string; telegramChatId: string | null; settlementIban: string | null; igUsername: string | null; instagramConnected: boolean; walletBalance: number; settings: Settings };
 }
 
-type Tab = "general" | "agent" | "booking" | "loyalty" | "payments" | "pricing" | "integrations" | "wallet";
+const TABS = ["general", "agent", "booking", "loyalty", "payments", "pricing", "integrations", "wallet"] as const;
+type Tab = (typeof TABS)[number];
 
 export default function SettingsPage() {
   const { t } = useI18n();
   const { shop } = useShop();
   const { data, mutate } = useApi<ShopResp>(`/shops/${shop.id}`);
   const [tab, setTab] = useState<Tab>("general");
+  // deep links such as the setup checklist's ?tab=payments
+  useEffect(() => {
+    const wanted = new URLSearchParams(window.location.search).get("tab");
+    if (wanted && TABS.includes(wanted as Tab)) setTab(wanted as Tab);
+  }, []);
   if (!data) return <Spinner />;
   const tabs: { value: Tab; label: string }[] = [
     { value: "general", label: t("s.general") },
@@ -64,7 +71,7 @@ function SettingsForm({ tab, data, onSaved }: { tab: Tab; data: ShopResp; onSave
   const { t } = useI18n();
   const { shop } = useShop();
   const s = data.shop.settings;
-  const [general, setGeneral] = useState({ name: data.shop.name, kind: data.shop.kind, brandColor: data.shop.brandColor, timezone: data.shop.timezone });
+  const [general, setGeneral] = useState({ name: data.shop.name, kind: data.shop.kind, brandColor: data.shop.brandColor, timezone: data.shop.timezone, logo: data.shop.logo });
   const [invoice, setInvoice] = useState(s.invoice);
   const [agent, setAgent] = useState(s.agent);
   const [booking, setBooking] = useState(s.booking);
@@ -125,6 +132,16 @@ function SettingsForm({ tab, data, onSaved }: { tab: Tab; data: ShopResp; onSave
           <Field label={t("onb.name")}>
             <Input value={general.name} onChange={(e) => setGeneral({ ...general, name: e.target.value })} />
           </Field>
+          <div className="flex items-center gap-3">
+            <span className="label !mb-0">{t("onb.logo")}</span>
+            {general.logo && <img src={general.logo} alt="" className="size-12 rounded-xl object-cover" />}
+            <UploadButton label={t("sv.upload")} onUploaded={(logo) => setGeneral({ ...general, logo })} />
+            {general.logo && (
+              <Button size="sm" variant="ghost" onClick={() => setGeneral({ ...general, logo: null })}>
+                {t("sv.remove")}
+              </Button>
+            )}
+          </div>
           <Field label={t("onb.kind")}>
             <Select value={general.kind} onChange={(e) => setGeneral({ ...general, kind: e.target.value })}>
               {(["retail", "services", "hybrid"] as const).map((k) => (

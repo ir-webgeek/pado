@@ -19,6 +19,7 @@ import {
   Package,
   Scissors,
   Settings,
+  Smartphone,
   ShoppingBag,
   Users,
 } from "lucide-react";
@@ -79,7 +80,13 @@ const groups: { key: DictKey; items: NavItem[] }[] = [
       { href: "/panel/reports", key: "p.reports", icon: ChartColumn },
     ],
   },
-  { key: "p.group.account", items: [{ href: "/panel/settings", key: "p.settings", icon: Settings }] },
+  {
+    key: "p.group.account",
+    items: [
+      { href: "/panel/settings", key: "p.settings", icon: Settings },
+      { href: "/install", key: "pwa.link", icon: Smartphone },
+    ],
+  },
 ];
 
 export default function PanelLayout({ children }: { children: React.ReactNode }) {

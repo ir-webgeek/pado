@@ -17,6 +17,9 @@ export const paginationSchema = z.object({
 export const requestOtpSchema = z.object({ phone: phoneSchema });
 export const verifyOtpSchema = z.object({ phone: phoneSchema, code: z.string().length(5) });
 
+/** uploaded media (absolute http(s) URL) */
+const mediaUrl = z.string().url().max(500).refine((u) => /^https?:\/\//.test(u), "http(s) url required");
+
 export const createShopSchema = z.object({
   name: z.string().min(2).max(80),
   slug: slugSchema,
@@ -30,6 +33,7 @@ export const updateShopSettingsSchema = z.object({
   brandColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
   theme: z.string().max(40).optional(),
   timezone: z.string().max(60).optional(),
+  logo: mediaUrl.nullable().optional(),
   loyalty: z
     .object({ enabled: z.boolean(), tomanPerPoint: z.number().int().min(1000), pointValue: z.number().int().min(0), expiryDays: z.number().int().min(0) })
     .partial()
@@ -176,8 +180,6 @@ export const discountInputSchema = z.object({
 });
 
 // ---------- appointments ----------
-const mediaUrl = z.string().url().max(500).refine((u) => /^https?:\/\//.test(u), "http(s) url required");
-
 export const serviceInputSchema = z.object({
   name: z.string().min(1).max(120),
   description: z.string().max(2000).default(""),

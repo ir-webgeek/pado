@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>آفلاین | شاپینو</title>
+    <style>
+      :root { color-scheme: dark light; --bg: #0b0916; --card: #1a1631; --text: #f4f3fa; --muted: #a29dbd; --accent: #3ddbc4; --ink: #062420; }
+      @media (prefers-color-scheme: light) { :root { --bg: #f6f5fb; --card: #fff; --text: #15122a; --muted: #625d80; --accent: #0b7a6d; --ink: #fff; } }
+      body { margin: 0; min-height: 100dvh; display: grid; place-items: center; background: var(--bg); color: var(--text); font-family: system-ui, Tahoma, sans-serif; padding: 16px; box-sizing: border-box; }
+      main { background: var(--card); border-radius: 20px; padding: 32px 24px; max-width: 360px; text-align: center; }
+      img { width: 56px; height: 56px; border-radius: 14px; }
+      h1 { font-size: 20px; margin: 16px 0 8px; }
+      p { color: var(--muted); line-height: 1.9; margin: 0 0 20px; }
+      button { background: var(--accent); color: var(--ink); border: 0; border-radius: 999px; padding: 12px 28px; font: inherit; font-weight: 600; cursor: pointer; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <img src="/icons/icon-192.png" alt="" />
+      <h1>اتصال اینترنت برقرار نیست</h1>
+      <p>شاپینو برای نمایش سفارش‌ها و نوبت‌های به‌روز به اینترنت نیاز دارد. اتصال را بررسی کنید و دوباره امتحان کنید.</p>
+      <button onclick="location.reload()">تلاش دوباره</button>
+    </main>
+  </body>
+</html>

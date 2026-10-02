@@ -17,6 +17,11 @@ export function ShopProvider({ value, children }: { value: { shop: ShopSummary; 
   return <ShopContext.Provider value={value}>{children}</ShopContext.Provider>;
 }
 
+/** Shop context when rendered inside the panel, otherwise null (e.g. onboarding). */
+export function useShopMaybe() {
+  return useContext(ShopContext);
+}
+
 export function useShop() {
   const ctx = useContext(ShopContext);
   if (!ctx) throw new Error("useShop outside ShopProvider");
