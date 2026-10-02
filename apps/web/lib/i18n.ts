@@ -269,6 +269,7 @@ const fa = {
   // appointments
   "ap.day": "روز",
   "ap.week": "هفته",
+  "ap.month": "ماه",
   "ap.staff": "پرسنل",
   "ap.service": "خدمت",
   "ap.time": "زمان",
@@ -827,6 +828,7 @@ const en: Record<DictKey, string> = {
   "pr.empty": "No products yet",
   "ap.day": "Day",
   "ap.week": "Week",
+  "ap.month": "Month",
   "ap.staff": "Staff",
   "ap.service": "Service",
   "ap.time": "Time",

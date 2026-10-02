@@ -1,6 +1,27 @@
 import { describe, expect, it } from "vitest";
-import { addDaysIso, tzOffsetMinutes, weekdayOfIso, zonedIsoDate, zonedToUtc } from "./time";
+import { addDaysIso, isoToJalali, jalaliMonthLength, jalaliToIso, tzOffsetMinutes, weekdayOfIso, zonedIsoDate, zonedToUtc } from "./time";
 import { normalizeIranPhone } from "./codes";
+
+describe("jalali", () => {
+  it("converts known dates", () => {
+    expect(isoToJalali("2026-03-21")).toEqual({ jy: 1405, jm: 1, jd: 1 });
+    expect(isoToJalali("2026-10-02")).toEqual({ jy: 1405, jm: 7, jd: 10 });
+    expect(jalaliToIso(1403, 12, 30)).toBe("2025-03-20");
+    expect(jalaliToIso(1405, 7, 10)).toBe("2026-10-02");
+  });
+  it("round-trips every day across several years", () => {
+    for (let d = "2020-01-01"; d < "2031-01-01"; d = addDaysIso(d, 1)) {
+      const j = isoToJalali(d);
+      expect(jalaliToIso(j.jy, j.jm, j.jd)).toBe(d);
+    }
+  });
+  it("month lengths, including leap Esfand", () => {
+    expect(jalaliMonthLength(1405, 1)).toBe(31);
+    expect(jalaliMonthLength(1405, 7)).toBe(30);
+    expect(jalaliMonthLength(1403, 12)).toBe(30);
+    expect(jalaliMonthLength(1404, 12)).toBe(29);
+  });
+});
 
 describe("time", () => {
   it("Tehran offset is +03:30", () => {

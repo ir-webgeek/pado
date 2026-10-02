@@ -4,8 +4,10 @@ import clsx from "clsx";
 import { CalendarOff, ChevronLeft, ChevronRight, Plus, UserPlus } from "lucide-react";
 import { useMemo, useState } from "react";
 import { addDaysIso, weekdayOfIso, zonedIsoDate, zonedToUtc } from "@shopino/shared";
+import { DatePicker, MonthGrid, MonthNav } from "@/components/date-picker";
 import { Badge, Button, Card, ErrorNote, Field, Input, Modal, PageHeader, Select, Spinner, Tabs, Textarea, Toggle, statusTone } from "@/components/ui";
 import { api, useApi } from "@/lib/api";
+import { monthOf } from "@/lib/calendar";
 import { dayLabel, latinDigits, money, num, time, weekdayShort } from "@/lib/format";
 import type { DictKey } from "@/lib/i18n";
 import { useI18n } from "@/lib/locale-client";
@@ -24,16 +26,17 @@ export default function AppointmentsPage() {
   const { t, locale } = useI18n();
   const { shop } = useShop();
   const tz = useShopTz();
-  const [view, setView] = useState<"day" | "week">("day");
+  const [view, setView] = useState<"day" | "week" | "month">("day");
   const [date, setDate] = useState(() => zonedIsoDate(new Date(), tz));
   const [selected, setSelected] = useState<Appointment | null>(null);
   const [creating, setCreating] = useState<{ staffId?: string; startsAt?: string } | null>(null);
   const [timeOffOpen, setTimeOffOpen] = useState(false);
   const [walkIn, setWalkIn] = useState(false);
 
-  const days = view === "day" ? 1 : 7;
+  const month = monthOf(date, locale);
+  const days = view === "day" ? 1 : view === "week" ? 7 : month.length;
   // week view starts on Saturday (Iranian week)
-  const start = view === "day" ? date : addDaysIso(date, -((weekdayOfIso(date) + 1) % 7));
+  const start = view === "day" ? date : view === "week" ? addDaysIso(date, -((weekdayOfIso(date) + 1) % 7)) : month.first;
   const from = zonedToUtc(start, 0, tz).toISOString();
   const to = zonedToUtc(addDaysIso(start, days), 0, tz).toISOString();
 
@@ -46,13 +49,14 @@ export default function AppointmentsPage() {
 
   const { data: refunds, mutate: reloadRefunds } = useApi<Appointment[]>(`/shops/${shop.id}/appointments/refunds`);
   const activeStaff = (staff ?? []).filter((s) => s.active);
-  const shift = (n: number) => setDate((d) => addDaysIso(d, n * days));
+  const shift = (n: number) => (view === "month" ? setDate(n < 0 ? month.prev : month.next) : setDate((d) => addDaysIso(d, n * days)));
+  const subtitle = view === "day" ? dayLabel(date, locale) : view === "week" ? `${dayLabel(start, locale)} - ${dayLabel(addDaysIso(start, 6), locale)}` : month.label;
 
   return (
     <div>
       <PageHeader
         title={t("p.appointments")}
-        subtitle={view === "day" ? dayLabel(date, locale) : `${dayLabel(start, locale)} - ${dayLabel(addDaysIso(start, 6), locale)}`}
+        subtitle={subtitle}
         actions={
           <>
             <Button onClick={() => setWalkIn(true)}>
@@ -79,8 +83,16 @@ export default function AppointmentsPage() {
             {locale === "fa" ? <ChevronLeft className="size-4" /> : <ChevronRight className="size-4" />}
           </button>
         </div>
-        <Tabs value={view} onChange={setView} items={[{ value: "day", label: t("ap.day") }, { value: "week", label: t("ap.week") }]} />
-        <input type="date" className="input !w-auto !py-1.5 text-sm" value={date} onChange={(e) => e.target.value && setDate(e.target.value)} />
+        <Tabs
+          value={view}
+          onChange={setView}
+          items={[
+            { value: "day", label: t("ap.day") },
+            { value: "week", label: t("ap.week") },
+            { value: "month", label: t("ap.month") },
+          ]}
+        />
+        <DatePicker value={date} onChange={setDate} tz={tz} className="w-60 [&_.input]:!py-1.5 [&_.input]:text-sm" />
       </div>
 
       {refunds && refunds.length > 0 && (
@@ -108,8 +120,19 @@ export default function AppointmentsPage() {
           onSelect={setSelected}
           onEmptyClick={(staffId, startsAt) => setCreating({ staffId, startsAt })}
         />
-      ) : (
+      ) : view === "week" ? (
         <WeekGrid start={start} tz={tz} appointments={cal.appointments} onSelect={setSelected} />
+      ) : (
+        <MonthView
+          anchor={date}
+          tz={tz}
+          appointments={cal.appointments}
+          onMonth={setDate}
+          onPickDay={(d) => {
+            setDate(d);
+            setView("day");
+          }}
+        />
       )}
 
       {selected && (
@@ -284,6 +307,78 @@ function WeekGrid({ start, tz, appointments, onSelect }: { start: string; tz: st
           </Card>
         );
       })}
+    </div>
+  );
+}
+
+function MonthView({
+  anchor,
+  tz,
+  appointments,
+  onMonth,
+  onPickDay,
+}: {
+  anchor: string;
+  tz: string;
+  appointments: Appointment[];
+  onMonth: (iso: string) => void;
+  onPickDay: (iso: string) => void;
+}) {
+  const { locale } = useI18n();
+  const m = monthOf(anchor, locale);
+  const byDay = useMemo(() => {
+    const map = new Map<string, { online: number; offline: number; pending: number }>();
+    for (const a of appointments) {
+      if (a.status === "cancelled") continue;
+      const d = zonedIsoDate(new Date(a.startsAt), tz);
+      const v = map.get(d) ?? { online: 0, offline: 0, pending: 0 };
+      if (["pos", "phone"].includes(a.channel)) v.offline++;
+      else v.online++;
+      if (a.status === "pending") v.pending++;
+      map.set(d, v);
+    }
+    return map;
+  }, [appointments, tz]);
+  return (
+    <Card className="mx-auto max-w-3xl">
+      <MonthNav label={m.label} onPrev={() => onMonth(m.prev)} onNext={() => onMonth(m.next)} />
+      <div className="mt-3">
+        <MonthGrid
+          anchor={anchor}
+          today={zonedIsoDate(new Date(), tz)}
+          onPick={onPickDay}
+          cellClassName="min-h-16 justify-start gap-1 border border-[var(--border)] py-1.5 sm:min-h-20"
+          renderDay={(d) => {
+            const v = byDay.get(d);
+            if (!v) return null;
+            return (
+              <span className="flex flex-wrap justify-center gap-0.5 text-[10px] leading-4">
+                {v.online > 0 && <span className="rounded-full bg-info/15 px-1.5 text-info">{num(v.online, locale)}</span>}
+                {v.offline > 0 && <span className="rounded-full bg-[var(--surface-sunken)] px-1.5 muted">{num(v.offline, locale)}</span>}
+                {v.pending > 0 && <span className="size-1.5 self-center rounded-full bg-warning" />}
+              </span>
+            );
+          }}
+        />
+      </div>
+      <MonthLegend />
+    </Card>
+  );
+}
+
+function MonthLegend() {
+  const { t } = useI18n();
+  return (
+    <div className="mt-3 flex flex-wrap gap-3 text-[11px] muted">
+      <span className="flex items-center gap-1">
+        <span className="size-2 rounded-full bg-info" /> {t("ap.online")}
+      </span>
+      <span className="flex items-center gap-1">
+        <span className="size-2 rounded-full bg-[var(--border-strong)]" /> {t("ap.offline")}
+      </span>
+      <span className="flex items-center gap-1">
+        <span className="size-2 rounded-full bg-warning" /> {t("st.pending")}
+      </span>
     </div>
   );
 }
@@ -476,7 +571,7 @@ function BookingModal({
             </Select>
           </Field>
           <Field label={t("ap.day")}>
-            <Input type="date" value={date} onChange={(e) => (setDate(e.target.value), setSlot(null))} />
+            <DatePicker value={date} tz={tz} onChange={(d) => (setDate(d), setSlot(null))} />
           </Field>
         </div>
         <div>
@@ -554,10 +649,10 @@ function TimeOffModal({ staff, tz, date, onClose, onSaved }: { staff: Staff[]; t
             ))}
           </Select>
         </Field>
-        <div className="grid grid-cols-3 gap-2">
-          <Field label={t("ap.day")}>
-            <Input type="date" value={day} onChange={(e) => setDay(e.target.value)} />
-          </Field>
+        <Field label={t("ap.day")}>
+          <DatePicker value={day} tz={tz} onChange={setDay} />
+        </Field>
+        <div className="grid grid-cols-2 gap-2">
           <Field label="⟶">
             <Input type="time" value={fromT} onChange={(e) => setFromT(e.target.value)} />
           </Field>
@@ -630,7 +725,7 @@ function WalkInModal({ services, staff, tz, onClose, onBooked }: { services: Ser
         <Toggle checked={now} onChange={setNow} label={t("ap.now")} />
         {!now && (
           <div className="grid grid-cols-2 gap-3">
-            <Input type="date" value={day} onChange={(e) => setDay(e.target.value)} />
+            <DatePicker value={day} tz={tz} onChange={setDay} />
             <Input type="time" value={at} onChange={(e) => setAt(e.target.value)} />
           </div>
         )}
