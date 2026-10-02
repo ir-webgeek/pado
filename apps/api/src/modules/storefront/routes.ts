@@ -20,11 +20,11 @@ import { PAYMENT_METHODS, planHas, completeOrderSchema, createAppointmentSchema,
 import type { Ctx } from "../../lib/context";
 import { TtlCache } from "../../lib/cache";
 import { safeEqual } from "../../lib/crypto";
-import { conflict, notFound } from "../../lib/errors";
+import { notFound } from "../../lib/errors";
 import { saveUpload } from "../../lib/uploads";
 import { createOrder, getOrderFull, prepareCheckout } from "../orders/service";
 import { attachReceipt, startAppointmentPayment, startOrderPayment, handleGatewayCallback } from "../payments/service";
-import { bookAppointment, getSlots, rescheduleAppointment, transitionAppointment } from "../appointments/service";
+import { bookAppointment, customerCancelAppointment, getSlots, rescheduleAppointment } from "../appointments/service";
 import { aiAvailable } from "../agent/llm";
 import { handleInbound } from "../inbox/pipeline";
 
@@ -253,10 +253,11 @@ export const storefrontRoutes =
       const { accessToken: _t, customer, events, ...order } = o;
       return {
         order: { ...order, timeline: events.map((e) => ({ type: e.type, at: e.createdAt })) },
-        customer: customer ? { name: customer.name, points: customer.points } : null,
+        customer: customer ? { name: customer.name, points: customer.points, walletBalance: customer.walletBalance } : null,
         shop: { name: shop!.name, slug: shop!.slug, brandColor: shop!.brandColor, logo: shop!.logo },
         shippingMethods: methods.map((m) => ({ id: m.id, name: m.name, price: m.price, freeOver: m.freeOver })),
-        paymentMethods: ["gateway", ...(settings.cardToCard.cardNumber ? ["card_to_card"] : [])],
+        // the final total depends on shipping, so the page decides whether the wallet covers it
+        paymentMethods: ["gateway", ...(settings.cardToCard.cardNumber ? ["card_to_card"] : []), ...(customer && customer.walletBalance > 0 ? ["wallet"] : [])],
         loyalty: settings.loyalty.enabled ? { pointValue: settings.loyalty.pointValue } : null,
         pendingCardPayment: pending ? { id: pending.id, status: pending.status, card: settings.cardToCard } : null,
       };
@@ -268,7 +269,7 @@ export const storefrontRoutes =
       async (req) => {
         const o = await orderWithToken(req.params.code, req.query.t);
         await ctx.db.transaction((tx) => prepareCheckout(tx, o.id, req.body));
-        return startOrderPayment(ctx.db, o.id);
+        return startOrderPayment(ctx.db, ctx.queues, o.id);
       },
     );
 
@@ -356,14 +357,16 @@ export const storefrontRoutes =
       ]);
       const settings = resolveShopSettings(shop!.settings);
       const { accessToken: _t, internalNote: _n, ...booking } = a;
+      const due = a.depositAmount > 0 ? a.depositAmount : a.price - a.discountTotal;
+      const wallet = cust?.walletBalance ?? 0;
       return {
         booking,
         service: { id: svc!.id, name: svc!.name, durationMin: svc!.durationMin },
         staff: { id: st!.id, name: st!.name, title: st!.title },
-        customer: { name: cust?.name },
+        customer: { name: cust?.name, walletBalance: wallet },
         shop: { name: shop!.name, slug: shop!.slug, brandColor: shop!.brandColor, timezone: shop!.timezone },
-        policy: { cancelWindowMin: settings.booking.cancelWindowMin },
-        paymentMethods: ["gateway", ...(settings.cardToCard.cardNumber ? ["card_to_card"] : [])],
+        policy: { cancelWindowMin: settings.booking.cancelWindowMin, customerReschedule: settings.booking.customerReschedule, refundToWallet: settings.booking.refundToWallet },
+        paymentMethods: ["gateway", ...(settings.cardToCard.cardNumber ? ["card_to_card"] : []), ...(wallet >= due && due > 0 ? ["wallet"] : [])],
         card: settings.cardToCard.cardNumber ? settings.cardToCard : null,
       };
     });
@@ -373,7 +376,7 @@ export const storefrontRoutes =
       { schema: { params: orderParams, querystring: tokenQuery, body: z.object({ method: z.enum(PAYMENT_METHODS).default("gateway") }) } },
       async (req) => {
         const a = await bookingWithToken(req.params.code, req.query.t);
-        return startAppointmentPayment(ctx.db, a.id, req.body.method);
+        return startAppointmentPayment(ctx.db, ctx.queues, a.id, req.body.method);
       },
     );
 
@@ -382,13 +385,7 @@ export const storefrontRoutes =
       { schema: { params: orderParams, querystring: tokenQuery, body: z.object({ reason: z.string().max(300).optional() }) } },
       async (req) => {
         const a = await bookingWithToken(req.params.code, req.query.t);
-        const shop = await ctx.db.query.shops.findFirst({ where: eq(shops.id, a.shopId) });
-        const { booking } = resolveShopSettings(shop!.settings);
-        if (a.startsAt.getTime() - Date.now() < booking.cancelWindowMin * 60_000) {
-          throw conflict("too_late", "online cancellation window has passed - please contact the shop");
-        }
-        const updated = await transitionAppointment(ctx.db, ctx.queues, a.shopId, a.id, "cancelled", { type: "customer" }, req.body.reason, "customer");
-        return { status: updated.status };
+        return customerCancelAppointment(ctx.db, ctx.queues, a.id, req.body.reason);
       },
     );
 

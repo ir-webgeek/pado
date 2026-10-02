@@ -1,14 +1,14 @@
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
-import { appointments, customers, orders, resolveShopSettings, services, shops, staff } from "@shopino/db";
+import { appointments, customerWalletTx, customers, orders, resolveShopSettings, services, shops, staff } from "@shopino/db";
 import { requestOtpSchema, rescheduleSchema, verifyOtpSchema } from "@shopino/shared";
 import { isProd } from "../../config";
 import { customerPhone } from "../../lib/auth";
 import type { Ctx } from "../../lib/context";
-import { conflict, notFound } from "../../lib/errors";
+import { notFound } from "../../lib/errors";
 import { requestOtp, verifyOtp } from "../../lib/otp";
-import { getSlots, rescheduleAppointment, transitionAppointment } from "../appointments/service";
+import { customerCancelAppointment, getSlots, rescheduleAppointment } from "../appointments/service";
 
 const CUSTOMER_SESSION_DAYS = 30;
 
@@ -38,7 +38,10 @@ export const customerRoutes =
 
     /** every customer row (one per shop) that belongs to this phone */
     async function profiles(phone: string) {
-      return ctx.db.select({ id: customers.id, shopId: customers.shopId, name: customers.name, points: customers.points }).from(customers).where(eq(customers.phone, phone));
+      return ctx.db
+        .select({ id: customers.id, shopId: customers.shopId, name: customers.name, points: customers.points, walletBalance: customers.walletBalance })
+        .from(customers)
+        .where(eq(customers.phone, phone));
     }
 
     app.get("/me", async (req) => {
@@ -48,8 +51,20 @@ export const customerRoutes =
       return {
         phone,
         name: rows.find((r) => r.name)?.name ?? null,
-        shops: rows.map((r) => ({ ...shopRows.find((s) => s.id === r.shopId), points: r.points })),
+        shops: rows.map((r) => ({ ...shopRows.find((s) => s.id === r.shopId), points: r.points, walletBalance: r.walletBalance })),
       };
+    });
+
+    app.get("/wallet", async (req) => {
+      const ids = (await profiles(customerPhone(req))).map((r) => r.id);
+      if (!ids.length) return [];
+      return ctx.db
+        .select({ id: customerWalletTx.id, amount: customerWalletTx.amount, balanceAfter: customerWalletTx.balanceAfter, reason: customerWalletTx.reason, note: customerWalletTx.note, createdAt: customerWalletTx.createdAt, shopName: shops.name })
+        .from(customerWalletTx)
+        .innerJoin(shops, eq(shops.id, customerWalletTx.shopId))
+        .where(inArray(customerWalletTx.customerId, ids))
+        .orderBy(desc(customerWalletTx.createdAt))
+        .limit(50);
     });
 
     app.get("/appointments", async (req) => {
@@ -87,8 +102,9 @@ export const customerRoutes =
           staff: { id: a.staffId, name: r.staffName },
           shop: { name: r.shopName, slug: r.shopSlug, timezone: r.timezone, brandColor: r.brandColor },
           canCancel: open && beforeWindow,
-          canReschedule: open && beforeWindow,
+          canReschedule: open && beforeWindow && policy.customerReschedule,
           cancelWindowMin: policy.cancelWindowMin,
+          refundToWallet: policy.refundToWallet,
         };
       });
     });
@@ -142,15 +158,7 @@ export const customerRoutes =
 
     app.post("/appointments/:id/cancel", { schema: { params: idParams, body: z.object({ reason: z.string().max(300).optional() }) } }, async (req) => {
       const a = await ownAppointment(req, req.params.id);
-      const shop = await ctx.db.query.shops.findFirst({ where: eq(shops.id, a.shopId) });
-      const { booking } = resolveShopSettings(shop!.settings);
-      if (a.startsAt.getTime() - Date.now() < booking.cancelWindowMin * 60_000) {
-        throw conflict("too_late", "online cancellation window has passed - please contact the shop");
-      }
-      const updated = await transitionAppointment(ctx.db, ctx.queues, a.shopId, a.id, "cancelled", { type: "customer" }, req.body.reason, "customer");
-      // money already paid is settled by the shop (refund or keep per its policy)
-      if (a.paidAmount > 0) await ctx.db.update(appointments).set({ refundStatus: "requested" }).where(eq(appointments.id, a.id));
-      return { status: updated.status, refundRequested: a.paidAmount > 0 };
+      return customerCancelAppointment(ctx.db, ctx.queues, a.id, req.body.reason);
     });
 
     app.post("/appointments/:id/reschedule", { schema: { params: idParams, body: rescheduleSchema } }, async (req) => {

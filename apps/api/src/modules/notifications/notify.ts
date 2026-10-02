@@ -95,6 +95,15 @@ export async function notifyAppointmentCancelled(db: Database, appointmentId: st
   }
 }
 
+export async function notifyWalletRefund(db: Database, appointmentId: string) {
+  const c = await apptCtx(db, appointmentId);
+  if (!c || c.a.refundStatus !== "wallet" || !c.customer.phone || c.customer.smsOptOut) return;
+  await sendSms(
+    c.customer.phone,
+    `${c.shop.name}: مبلغ ${formatToman(c.a.paidAmount)} بابت لغو نوبت ${c.svc.name} به کیف پول شما برگشت. موجودی: ${formatToman(c.customer.walletBalance)}. ${env.PUBLIC_WEB_URL}/me`,
+  );
+}
+
 export async function sendAppointmentReminder(db: Database, appointmentId: string, offsetMin: number) {
   const c = await apptCtx(db, appointmentId);
   if (!c || !["confirmed", "pending"].includes(c.a.status)) return;

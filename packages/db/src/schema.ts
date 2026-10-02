@@ -99,6 +99,10 @@ export interface ShopSettings {
     cancelWindowMin: number;
     autoConfirm: boolean;
     reminderOffsetsMin: number[];
+    /** customers may move their own booking (before cancelWindowMin) */
+    customerReschedule: boolean;
+    /** money paid for a booking the customer cancels in time goes straight to their shop wallet */
+    refundToWallet: boolean;
   };
   agent: {
     enabled: boolean;
@@ -127,6 +131,8 @@ export const DEFAULT_SHOP_SETTINGS: ShopSettings = {
     cancelWindowMin: 180,
     autoConfirm: true,
     reminderOffsetsMin: [24 * 60, 120],
+    customerReschedule: true,
+    refundToWallet: false,
   },
   agent: {
     enabled: false,
@@ -354,6 +360,8 @@ export const customers = pgTable(
     noShowCount: integer().notNull().default(0),
     lastVisitAt: timestamp({ withTimezone: true }),
     points: integer().notNull().default(0),
+    /** store credit held by this shop (refunds), spendable on its bookings and orders */
+    walletBalance: money().notNull().default(0),
     segment: customerSegment().notNull().default("new"),
     smsOptOut: boolean().notNull().default(false),
     createdAt: createdAt(),
@@ -364,7 +372,27 @@ export const customers = pgTable(
     uniqueIndex().on(t.shopId, t.instagramId),
     index().on(t.shopId, t.segment),
     index().on(t.shopId, t.lastOrderAt),
+    check("customer_wallet_non_negative", sql`${t.walletBalance} >= 0`),
   ],
+);
+
+export const customerWalletTx = pgTable(
+  "customer_wallet_tx",
+  {
+    id: id(),
+    shopId: shopRef(),
+    customerId: uuid()
+      .notNull()
+      .references(() => customers.id, { onDelete: "cascade" }),
+    amount: money().notNull(),
+    balanceAfter: money().notNull(),
+    reason: text().notNull(), // refund | payment | adjust
+    refType: text(),
+    refId: text(),
+    note: text(),
+    createdAt: createdAt(),
+  },
+  (t) => [index().on(t.customerId, t.createdAt), index().on(t.shopId, t.createdAt)],
 );
 
 export const loyaltyLedger = pgTable(

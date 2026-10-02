@@ -16,6 +16,7 @@ export interface JobPayloads {
   "notify.receipt-uploaded": { paymentId: string };
   "notify.appointment-booked": { appointmentId: string };
   "notify.appointment-cancelled": { appointmentId: string };
+  "notify.wallet-refund": { appointmentId: string };
   "campaign.send": { campaignId: string };
   "pricing.refresh-usd": Record<string, never>;
   "instagram.analyze": { shopId: string; mediaRowIds: string[] };
@@ -35,6 +36,7 @@ const queueOf: Record<JobName, keyof typeof QUEUE_NAMES> = {
   "notify.receipt-uploaded": "events",
   "notify.appointment-booked": "events",
   "notify.appointment-cancelled": "events",
+  "notify.wallet-refund": "events",
   "campaign.send": "events",
   "pricing.refresh-usd": "scheduled",
   "instagram.analyze": "inbound",

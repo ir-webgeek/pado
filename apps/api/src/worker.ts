@@ -13,6 +13,7 @@ import {
   notifyOrderPaid,
   notifyOrderShipped,
   notifyReceiptUploaded,
+  notifyWalletRefund,
   sendAppointmentReminder,
   sendCampaign,
 } from "./modules/notifications/notify";
@@ -59,6 +60,7 @@ const handlers: Handlers = {
   "notify.receipt-uploaded": ({ paymentId }) => notifyReceiptUploaded(db, paymentId),
   "notify.appointment-booked": ({ appointmentId }) => notifyAppointmentBooked(db, appointmentId),
   "notify.appointment-cancelled": ({ appointmentId }) => notifyAppointmentCancelled(db, appointmentId),
+  "notify.wallet-refund": ({ appointmentId }) => notifyWalletRefund(db, appointmentId),
   "campaign.send": ({ campaignId }) => sendCampaign(db, campaignId),
   "ig.message": (d) =>
     handleInbound(db, queues, redis, { shopId: d.shopId, channel: "instagram", externalUserId: d.igsid, text: d.text, externalId: d.mid, attachments: d.attachments, storyReplyId: d.storyReplyId }),

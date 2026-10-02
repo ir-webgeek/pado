@@ -1,11 +1,13 @@
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
 import { and, desc, eq, ilike, or, sql } from "drizzle-orm";
 import { z } from "zod";
-import { appointments, customers, loyaltyLedger, orders, services } from "@shopino/db";
+import { appointments, customerWalletTx, customers, loyaltyLedger, orders, services } from "@shopino/db";
 import { CUSTOMER_SEGMENTS } from "@shopino/shared";
 import type { Ctx } from "../../lib/context";
+import { audit } from "../../lib/audit";
 import { requireShop } from "../../lib/auth";
 import { notFound } from "../../lib/errors";
+import { customerWalletMove } from "../wallet/service";
 import { changePoints, upsertCustomer } from "./service";
 import { vipProgress } from "./segments";
 
@@ -69,7 +71,7 @@ export const customerRoutes =
     app.get("/:shopId/customers/:id", { preHandler: requireShop(ctx), schema: { params: withId } }, async (req) => {
       const c = await ctx.db.query.customers.findFirst({ where: and(eq(customers.id, req.params.id), eq(customers.shopId, req.shop.id)) });
       if (!c) throw notFound("customer");
-      const [recentOrders, visits, points] = await Promise.all([
+      const [recentOrders, visits, points, wallet] = await Promise.all([
         ctx.db.select().from(orders).where(eq(orders.customerId, c.id)).orderBy(desc(orders.createdAt)).limit(20),
         ctx.db
           .select({ appt: appointments, serviceName: services.name })
@@ -79,14 +81,32 @@ export const customerRoutes =
           .orderBy(desc(appointments.startsAt))
           .limit(20),
         ctx.db.select().from(loyaltyLedger).where(eq(loyaltyLedger.customerId, c.id)).orderBy(desc(loyaltyLedger.createdAt)).limit(30),
+        ctx.db.select().from(customerWalletTx).where(eq(customerWalletTx.customerId, c.id)).orderBy(desc(customerWalletTx.createdAt)).limit(30),
       ]);
       return {
         customer: { ...c, vipProgress: vipProgress(c, req.shop.settings) },
         orders: recentOrders,
         appointments: visits.map((v) => ({ ...v.appt, serviceName: v.serviceName })),
         points,
+        wallet,
       };
     });
+
+    app.post(
+      "/:shopId/customers/:id/wallet",
+      {
+        preHandler: requireShop(ctx, "admin"),
+        schema: { params: withId, body: z.object({ amount: z.number().int().min(-1_000_000_000).max(1_000_000_000).refine((v) => v !== 0), note: z.string().max(200).optional() }) },
+      },
+      async (req) => {
+        const balance = await ctx.db.transaction(async (tx) => {
+          const b = await customerWalletMove(tx, req.shop.id, req.params.id, req.body.amount, "adjust", { type: "manual", id: req.user.sub }, req.body.note);
+          await audit(tx, req.shop.id, { type: "user", id: req.user.sub }, "customer.wallet_adjust", "customer", req.params.id, req.body);
+          return b;
+        });
+        return { walletBalance: balance };
+      },
+    );
 
     app.post(
       "/:shopId/customers",

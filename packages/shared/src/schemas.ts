@@ -44,6 +44,8 @@ export const updateShopSettingsSchema = z.object({
       cancelWindowMin: z.number().int().min(0),
       autoConfirm: z.boolean(),
       reminderOffsetsMin: z.array(z.number().int().min(5)).max(4),
+      customerReschedule: z.boolean(),
+      refundToWallet: z.boolean(),
     })
     .partial()
     .optional(),
