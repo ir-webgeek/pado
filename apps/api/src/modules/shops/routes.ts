@@ -121,6 +121,11 @@ export const shopRoutes =
             throw badRequest("invalid_timezone");
           }
         }
+        if (nested.alerts?.phone) {
+          const phone = normalizeIranPhone(nested.alerts.phone);
+          if (!phone) throw badRequest("invalid_phone", "enter a valid Iranian mobile number");
+          nested.alerts.phone = phone;
+        }
         const current = await ctx.db.query.shops.findFirst({ where: eq(shops.id, req.shop.id), columns: { settings: true } });
         const merged = { ...(current?.settings ?? {}) } as Record<string, unknown>;
         for (const [k, v] of Object.entries(nested)) {

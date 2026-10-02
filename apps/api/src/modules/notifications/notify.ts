@@ -1,5 +1,6 @@
 import { and, eq, gt, isNotNull } from "drizzle-orm";
-import { appointments, campaigns, conversations, customers, messages, orders, payments, services, shops, staff, type Database } from "@shopino/db";
+import type { Redis } from "ioredis";
+import { appointments, campaigns, conversations, customers, messages, orders, payments, resolveShopSettings, services, shops, staff, type Database } from "@shopino/db";
 import { sendText } from "../instagram/client";
 import { formatJalali, formatToman } from "@shopino/shared";
 import { env } from "../../config";
@@ -9,6 +10,36 @@ import { sendSms, smsParts } from "./sms";
 import { escapeHtml, sendTelegram } from "./telegram";
 
 const timeFa = (d: Date, tz: string) => formatJalali(d, { dateStyle: undefined, weekday: "long", day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" }, tz);
+
+type ShopRow = typeof shops.$inferSelect;
+type AlertKind = "onHandoff" | "onOrder" | "onBooking";
+
+/** SMS to the shop manager, when they turned that alert on and set a mobile number. */
+async function alertManager(shop: ShopRow, kind: AlertKind, text: string) {
+  const { alerts } = resolveShopSettings(shop.settings);
+  if (!alerts[kind] || !alerts.phone) return;
+  await sendSms(alerts.phone, text);
+}
+
+const HANDOFF_REASONS: Record<string, string> = {
+  "wallet empty": "موجودی کیف پول برای هوش مصنوعی تمام شده",
+  "agent could not produce a reply": "ایجنت نتوانست پاسخ بدهد",
+  "assistant declined to answer": "ایجنت پاسخ را به انسان سپرد",
+  automation: "پاسخ خودکار گفتگو را به شما سپرد",
+};
+
+/** One SMS per conversation per 30 minutes, so a chatty customer does not flood the manager. */
+export async function notifyHandoff(db: Database, redis: Redis, conversationId: string, reason: string) {
+  const conv = await db.query.conversations.findFirst({ where: eq(conversations.id, conversationId) });
+  if (!conv) return;
+  const shop = await db.query.shops.findFirst({ where: eq(shops.id, conv.shopId) });
+  if (!shop) return;
+  if ((await redis.set(`alert:handoff:${conv.id}`, "1", "EX", 1800, "NX")) !== "OK") return;
+  const customer = conv.customerId ? await db.query.customers.findFirst({ where: eq(customers.id, conv.customerId) }) : undefined;
+  const who = customer?.name ?? (conv.username ? `@${conv.username}` : "یک مشتری");
+  const why = HANDOFF_REASONS[reason] ?? reason.slice(0, 80);
+  await alertManager(shop, "onHandoff", `${shop.name}: ${who} در دایرکت به مشاور نیاز دارد (${why}). پاسخ: ${env.PUBLIC_WEB_URL}/panel/inbox`);
+}
 
 async function orderCtx(db: Database, orderId: string) {
   const o = await db.query.orders.findFirst({ where: eq(orders.id, orderId) });
@@ -25,6 +56,7 @@ export async function notifyOrderPaid(db: Database, orderId: string) {
   if (!c) return;
   const phone = c.o.address?.phone ?? c.customer?.phone;
   if (phone && !c.customer?.smsOptOut) await sendSms(phone, `${c.shop.name}: سفارش ${c.o.code} ثبت و پرداخت شد. پیگیری: ${c.link}`);
+  await alertManager(c.shop, "onOrder", `${c.shop.name}: سفارش جدید ${c.o.code} به مبلغ ${formatToman(c.o.total)} پرداخت شد. ${env.PUBLIC_WEB_URL}/panel/orders/${c.o.id}`);
   if (c.shop.telegramChatId) {
     await sendTelegram(
       c.shop.telegramChatId,
@@ -67,13 +99,20 @@ async function apptCtx(db: Database, appointmentId: string) {
   return { a, shop: shop!, customer: customer!, svc: svc!, st: st!, link: `${env.PUBLIC_WEB_URL}/b/booking/${a.code}?t=${a.accessToken}` };
 }
 
-export async function notifyAppointmentBooked(db: Database, appointmentId: string) {
+export async function notifyAppointmentBooked(db: Database, appointmentId: string, redis?: Redis) {
   const c = await apptCtx(db, appointmentId);
   if (!c || c.a.status === "cancelled") return;
   const when = timeFa(c.a.startsAt, c.shop.timezone);
-  if (c.customer.phone && !c.customer.smsOptOut) {
+  // this job runs on create, confirm, payment and reschedule: text the customer once per status + time
+  const fresh = !redis || (await redis.set(`sms:booking:${c.a.id}:${c.a.status}:${c.a.startsAt.getTime()}`, "1", "EX", 7 * 86400, "NX")) === "OK";
+  if (fresh && c.customer.phone && !c.customer.smsOptOut) {
     const state = c.a.status === "confirmed" ? "تایید شد" : "ثبت شد و در انتظار تایید است";
     await sendSms(c.customer.phone, `${c.shop.name}: نوبت ${c.svc.name} برای ${when} ${state}. ${c.link}`);
+  }
+  // online bookings only (the shop entered the others itself), once per booking: this job also runs on
+  // confirmation, payment and reschedule
+  if (redis && !["pos", "phone"].includes(c.a.channel) && (await redis.set(`alert:booking:${c.a.id}`, "1", "EX", 7 * 86400, "NX")) === "OK") {
+    await alertManager(c.shop, "onBooking", `${c.shop.name}: نوبت آنلاین ${c.a.code}، ${c.svc.name} با ${c.st.name}، ${when} (${c.customer.name ?? c.customer.phone ?? ""}).`);
   }
   if (c.shop.telegramChatId) {
     await sendTelegram(

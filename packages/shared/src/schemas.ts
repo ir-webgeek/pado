@@ -66,6 +66,7 @@ export const updateShopSettingsSchema = z.object({
     .partial()
     .optional(),
   cardToCard: z.object({ cardNumber: z.string().max(19), holder: z.string().max(80), bank: z.string().max(40) }).partial().optional(),
+  alerts: z.object({ phone: z.string().max(20), onHandoff: z.boolean(), onOrder: z.boolean(), onBooking: z.boolean() }).partial().optional(),
   invoice: z.object({ address: z.string().max(300), phone: z.string().max(40), postalCode: z.string().max(20), footer: z.string().max(300) }).partial().optional(),
   pricing: z
     .object({ usdEnabled: z.boolean(), markupPercent: z.number().min(0).max(500), roundTo: z.number().int().min(1).max(1_000_000), autoFetch: z.boolean() })

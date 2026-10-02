@@ -27,6 +27,7 @@ interface Settings {
   agent: { enabled: boolean; tone: string; rules: string; neverOfferDiscount: boolean; knowledge: string; consultOnWeb: boolean };
   cardToCard: { cardNumber: string; holder: string; bank: string };
   invoice: { address: string; phone: string; postalCode: string; footer: string };
+  alerts: { phone: string; onHandoff: boolean; onOrder: boolean; onBooking: boolean };
   pricing: { usdEnabled: boolean; usdRate: number; markupPercent: number; roundTo: number; rateUpdatedAt: string | null; autoFetch: boolean };
 }
 interface ShopResp {
@@ -74,6 +75,7 @@ function SettingsForm({ tab, data, onSaved }: { tab: Tab; data: ShopResp; onSave
   const s = data.shop.settings;
   const [general, setGeneral] = useState({ name: data.shop.name, kind: data.shop.kind, brandColor: data.shop.brandColor, timezone: data.shop.timezone, logo: data.shop.logo });
   const [invoice, setInvoice] = useState(s.invoice);
+  const [alerts, setAlerts] = useState(s.alerts);
   const [agent, setAgent] = useState(s.agent);
   const [booking, setBooking] = useState(s.booking);
   const [loyalty, setLoyalty] = useState(s.loyalty);
@@ -115,7 +117,7 @@ function SettingsForm({ tab, data, onSaved }: { tab: Tab; data: ShopResp; onSave
                   ? { cardToCard: card, ...(iban ? { settlementIban: iban.replace(/\s/g, "").toUpperCase() } : {}) }
                   : tab === "pricing"
                     ? { pricing: { usdEnabled: pricing.usdEnabled, markupPercent: pricing.markupPercent, roundTo: pricing.roundTo, autoFetch: pricing.autoFetch } }
-                    : { telegramChatId: telegram };
+                    : { telegramChatId: telegram, alerts: { ...alerts, phone: latinDigits(alerts.phone) } };
       await api(`/shops/${shop.id}/settings`, { method: "PATCH", json: body });
       setSaved(true);
       onSaved();
@@ -309,6 +311,16 @@ function SettingsForm({ tab, data, onSaved }: { tab: Tab; data: ShopResp; onSave
           <Field label={t("s.telegram")}>
             <Input dir="ltr" value={telegram} onChange={(e) => setTelegram(e.target.value)} />
           </Field>
+          <div className="space-y-1 rounded-xl border border-[var(--border)] p-3">
+            <p className="text-sm font-semibold strong">{t("al.title")}</p>
+            <p className="text-xs muted">{t("al.sub")}</p>
+            <Field label={t("al.phone")} className="pt-2">
+              <Input dir="ltr" inputMode="tel" placeholder="0912 000 0000" value={alerts.phone} maxLength={20} onChange={(e) => setAlerts({ ...alerts, phone: e.target.value })} />
+            </Field>
+            <Toggle checked={alerts.onHandoff} onChange={(v) => setAlerts({ ...alerts, onHandoff: v })} label={t("al.handoff")} />
+            {shop.kind !== "services" && <Toggle checked={alerts.onOrder} onChange={(v) => setAlerts({ ...alerts, onOrder: v })} label={t("al.order")} />}
+            {shop.kind !== "retail" && <Toggle checked={alerts.onBooking} onChange={(v) => setAlerts({ ...alerts, onBooking: v })} label={t("al.booking")} />}
+          </div>
           <InstagramConnect shop={data.shop} onChanged={onSaved} />
           <details className="rounded-xl border border-[var(--border)] p-3">
             <summary className="cursor-pointer text-sm muted">{t("ig.manualToken")}</summary>

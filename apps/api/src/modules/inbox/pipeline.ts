@@ -118,6 +118,7 @@ export async function handleInbound(db: Database, queues: Queues, redis: Redis, 
         const sent = await sendRuleMessages(db, account, conv!, rule);
         await recordRuleHit(db, rule, conv!.id, text);
         await applyThenMode(db, rule, conv!.id);
+        if (rule.thenMode === "human") await queues.add("notify.handoff", { conversationId: conv!.id, reason: "automation" });
         await db.update(conversations).set({ lastMessageAt: new Date(), unread: 0 }).where(eq(conversations.id, conv!.id));
         return { reply: sent.join("\n\n"), handoff: null, automation: { ruleId: rule.id, name: rule.name, messages: sent } };
       } catch (err) {
@@ -132,6 +133,7 @@ export async function handleInbound(db: Database, queues: Queues, redis: Redis, 
   if (!agentOn) return { reply: null, handoff: null };
   if ((await walletBalance(db, shop.id)) < env.AGENT_MIN_BALANCE) {
     await db.update(conversations).set({ needsHuman: true }).where(eq(conversations.id, conv!.id));
+    await queues.add("notify.handoff", { conversationId: conv!.id, reason: "wallet empty" });
     return { reply: null, handoff: "wallet empty" };
   }
 
@@ -178,6 +180,7 @@ export async function handleInbound(db: Database, queues: Queues, redis: Redis, 
     .set({ lastMessageAt: new Date(), unread: handoff ? fresh!.unread : 0, needsHuman: Boolean(handoff), ...(handoff ? { mode: "human" as const } : {}) })
     .where(eq(conversations.id, conv!.id));
 
+  if (handoff) await queues.add("notify.handoff", { conversationId: conv!.id, reason: handoff });
   if (handoff && shop.telegramChatId) {
     await sendTelegram(shop.telegramChatId, `🙋 <b>${escapeHtml(shop.name)}</b>\nA customer needs a human reply.\nReason: ${escapeHtml(handoff)}`, {
       text: "Open inbox",
