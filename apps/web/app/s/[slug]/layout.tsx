@@ -6,6 +6,7 @@ import { CartButton, CartProvider } from "@/components/store/cart";
 import { LangToggle } from "@/components/prefs";
 import { getT } from "@/lib/locale-server";
 import { publicGet, type PublicShop } from "@/lib/server-api";
+import { shopAccent } from "@/lib/brand";
 
 export default async function StoreLayout({ children, params }: { children: React.ReactNode; params: Promise<{ slug: string }> }) {
   const { slug } = await params;
@@ -15,7 +16,7 @@ export default async function StoreLayout({ children, params }: { children: Reac
   const { shop } = data;
   return (
     // storefronts use the light "day" palette with the shop's brand color as accent
-    <div data-theme="day" className="min-h-dvh bg-[var(--bg)] text-[var(--text-body)]" style={{ "--accent": shop.brandColor === "#d9d0b8" ? "#1b263b" : shop.brandColor } as React.CSSProperties}>
+    <div data-theme="day" className="min-h-dvh bg-[var(--bg)] text-[var(--text-body)]" style={{ "--accent": shopAccent(shop.brandColor) } as React.CSSProperties}>
       <CartProvider slug={slug}>
         <header className="sticky top-0 z-30 border-b border-[var(--border)] bg-[var(--bg-elev)]/90 backdrop-blur">
           <div className="mx-auto flex h-16 max-w-6xl items-center justify-between gap-3 px-4">

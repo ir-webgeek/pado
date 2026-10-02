@@ -23,17 +23,21 @@ import { SiteNav } from "@/components/landing/nav";
 import { PanelPreview } from "@/components/landing/panel-preview";
 import { PricingCards } from "@/components/landing/pricing-cards";
 import { Sky } from "@/components/landing/sky";
+import { Reveal } from "@/components/reveal";
 import { getT } from "@/lib/locale-server";
 import type { DictKey } from "@/lib/i18n";
+
+// calendar mock: accent, lavender and a warm peach, all dark-ink legible
+const MOCK_COLORS = ["#3ddbc4", "#b3a8f0", "#f4b88a"];
 
 function Section({ id, kicker, title, sub, children }: { id?: string; kicker?: string; title: string; sub?: string; children: React.ReactNode }) {
   return (
     <section id={id} className="mx-auto max-w-6xl scroll-mt-20 px-4 py-16 sm:py-24">
-      <div className="mx-auto mb-10 max-w-2xl text-center">
+      <Reveal className="mx-auto mb-10 max-w-2xl text-center">
         {kicker && <p className="mb-3 text-sm font-medium text-[var(--accent)]">{kicker}</p>}
         <h2 className="text-2xl font-bold leading-tight strong sm:text-4xl">{title}</h2>
         {sub && <p className="mt-4 muted sm:text-lg">{sub}</p>}
-      </div>
+      </Reveal>
       {children}
     </section>
   );
@@ -93,7 +97,7 @@ export default async function Home() {
           <h1 className="text-4xl font-extrabold leading-[1.25] strong animate-rise sm:text-6xl">
             {t("hero.title1")}
             <br />
-            <span className="bg-gradient-to-l from-gold via-[#f1ead6] to-sky-brand bg-clip-text text-transparent">{t("hero.title2")}</span>
+            <span className="hero-gradient">{t("hero.title2")}</span>
           </h1>
           <p className="mx-auto mt-6 max-w-2xl text-base leading-8 muted animate-rise sm:text-lg [animation-delay:.1s]">{t("hero.sub")}</p>
 
@@ -110,7 +114,8 @@ export default async function Home() {
           </div>
 
           <div className="mt-9 flex flex-wrap items-center justify-center gap-3 animate-rise [animation-delay:.3s]">
-            <Link href="/login" className="inline-flex h-12 items-center gap-2 rounded-full bg-[var(--accent)] px-7 font-medium text-[var(--accent-ink)] shadow-[0_12px_40px_-12px_rgb(217_208_184/.7)] transition hover:brightness-105">
+            <Link href="/login" className="relative inline-flex h-12 items-center gap-2 rounded-full bg-[var(--accent)] px-7 font-medium text-[var(--accent-ink)] shadow-[0_12px_40px_-12px_var(--accent)] transition hover:brightness-105">
+              <span aria-hidden className="absolute -inset-1 -z-10 rounded-full bg-gold/30 blur-md animate-halo" />
               {t("cta.start")}
             </Link>
             <Link href="/b/atelier-raha" className="inline-flex h-12 items-center gap-2 rounded-full px-5 text-sm strong hover:bg-[var(--surface-sunken)]">
@@ -127,13 +132,13 @@ export default async function Home() {
       {/* features bento */}
       <Section id="features" kicker={t("sec.what.k")} title={t("sec.what.t")} sub={t("sec.what.s")}>
         <div className="grid gap-3 md:grid-cols-4">
-          {features.map((f) => (
-            <div key={f.k} className={`card group relative overflow-hidden p-6 transition hover:border-gold/30 ${f.span ?? ""}`}>
+          {features.map((f, i) => (
+            <Reveal key={f.k} delay={i * 60} className={`card group relative overflow-hidden p-6 transition hover:-translate-y-0.5 hover:border-gold/30 ${f.span ?? ""}`}>
               <div className="absolute -end-10 -top-10 size-32 rounded-full bg-gold/5 blur-2xl transition group-hover:bg-gold/15" />
               <f.icon className="size-6 text-[var(--accent)]" />
               <h3 className="mt-4 font-semibold strong">{t(`f.${f.k}.t` as DictKey)}</h3>
               <p className="mt-1.5 text-sm leading-7 muted">{t(`f.${f.k}.s` as DictKey)}</p>
-            </div>
+            </Reveal>
           ))}
         </div>
       </Section>
@@ -147,14 +152,16 @@ export default async function Home() {
       <Section id="appointments" kicker={t("sec.appt.k")} title={t("sec.appt.t")} sub={t("sec.appt.s")}>
         <div className="grid items-center gap-8 lg:grid-cols-2">
           <ul className="grid gap-3 sm:grid-cols-2">
-            {(["appt.b1", "appt.b2", "appt.b3", "appt.b4", "appt.b5", "appt.b6"] as const).map((k) => (
-              <li key={k} className="card flex gap-3 p-4 text-sm">
-                <Check className="mt-0.5 size-4 shrink-0 text-success" />
-                <span className="strong">{t(k)}</span>
+            {(["appt.b1", "appt.b2", "appt.b3", "appt.b4", "appt.b5", "appt.b6"] as const).map((k, i) => (
+              <li key={k}>
+                <Reveal delay={i * 60} className="card flex h-full gap-3 p-4 text-sm">
+                  <Check className="mt-0.5 size-4 shrink-0 text-success" />
+                  <span className="strong">{t(k)}</span>
+                </Reveal>
               </li>
             ))}
           </ul>
-          <div className="glass rounded-[1.75rem] p-4">
+          <Reveal delay={120} className="glass rounded-[1.75rem] p-4">
             <div className="mb-3 flex items-center justify-between text-sm">
               <span className="font-semibold strong">{locale === "fa" ? "شنبه ۴ مهر" : "Sat, Sep 26"}</span>
               <span className="rounded-full bg-success/15 px-2 py-0.5 text-xs text-success">{locale === "fa" ? "۸۲٪ اشغال" : "82% booked"}</span>
@@ -163,7 +170,7 @@ export default async function Home() {
               <div />
               {(locale === "fa" ? ["رها", "نازنین", "مینا"] : ["Raha", "Nazanin", "Mina"]).map((n, i) => (
                 <div key={n} className="flex items-center gap-1.5 font-medium strong">
-                  <span className="size-2 rounded-full" style={{ background: ["#d9d0b8", "#c4b894", "#aebbd0"][i] }} /> {n}
+                  <span className="size-2 rounded-full" style={{ background: MOCK_COLORS[i] }} /> {n}
                 </div>
               ))}
               {["10:00", "11:00", "12:00", "13:00", "14:00"].map((h, row) => (
@@ -172,7 +179,7 @@ export default async function Home() {
                   {[0, 1, 2].map((c) => {
                     const busy = (row + c) % 3 !== 1;
                     return (
-                      <div key={c} className={`h-11 rounded-lg ${busy ? "" : "border border-dashed border-[var(--border-strong)]"}`} style={busy ? { background: ["#d9d0b8", "#c4b894", "#aebbd0"][c], opacity: 0.85 } : {}}>
+                      <div key={c} className={`h-11 rounded-lg ${busy ? "" : "border border-dashed border-[var(--border-strong)]"}`} style={busy ? { background: MOCK_COLORS[c], opacity: 0.85 } : {}}>
                         {busy && <span className="block px-1.5 py-1 font-medium text-ink-900">{locale === "fa" ? ["کوتاهی", "رنگ مو", "مانیکور"][c] : ["Haircut", "Color", "Manicure"][c]}</span>}
                       </div>
                     );
@@ -180,7 +187,7 @@ export default async function Home() {
                 </div>
               ))}
             </div>
-          </div>
+          </Reveal>
         </div>
       </Section>
 
@@ -188,7 +195,7 @@ export default async function Home() {
       <Section kicker={t("sec.compare.k")} title={t("sec.compare.t")}>
         <div className="grid gap-4 md:grid-cols-3">
           {compare.map((c, i) => (
-            <div key={c.title} className={`card p-6 ${i === 2 ? "border-gold/40 bg-gradient-to-b from-gold/10 to-transparent" : ""}`}>
+            <Reveal key={c.title} delay={i * 90} className={`card p-6 ${i === 2 ? "border-gold/40 bg-gradient-to-b from-gold/10 to-transparent" : ""}`}>
               <div className="mb-4 flex items-center gap-2">
                 {i === 0 ? <X className="size-5 text-danger" /> : i === 1 ? <Store className="size-5 text-info" /> : <Bot className="size-5 text-[var(--accent)]" />}
                 <h3 className="font-semibold strong">{c.title}</h3>
@@ -201,7 +208,7 @@ export default async function Home() {
                   </li>
                 ))}
               </ul>
-            </div>
+            </Reveal>
           ))}
         </div>
       </Section>
@@ -228,14 +235,14 @@ export default async function Home() {
 
       {/* final CTA */}
       <section className="mx-auto max-w-6xl px-4 pb-20">
-        <div className="glass relative overflow-hidden rounded-[2rem] px-6 py-14 text-center">
-          <div className="absolute inset-0 bg-[radial-gradient(600px_200px_at_50%_0%,rgb(217_208_184/.18),transparent)]" />
+        <Reveal className="glass relative overflow-hidden rounded-[2rem] px-6 py-14 text-center">
+          <div className="absolute inset-0 bg-[radial-gradient(600px_200px_at_50%_0%,rgb(61_219_196/.18),transparent)]" />
           <h2 className="relative text-2xl font-bold strong sm:text-4xl">{t("cta.final.t")}</h2>
           <p className="relative mt-3 muted">{t("cta.final.s")}</p>
           <Link href="/login" className="relative mt-8 inline-flex h-12 items-center rounded-full bg-[var(--accent)] px-8 font-medium text-[var(--accent-ink)]">
             {t("cta.start")}
           </Link>
-        </div>
+        </Reveal>
       </section>
 
       <SiteFooter t={t} />

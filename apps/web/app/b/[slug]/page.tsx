@@ -14,6 +14,7 @@ import { latinDigits, money, num, time } from "@/lib/format";
 import { useI18n } from "@/lib/locale-client";
 import { ServiceShowcase } from "@/components/service-media";
 import type { BeforeAfter, DaySlots } from "@/lib/types";
+import { shopAccent } from "@/lib/brand";
 
 interface ShopResp {
   shop: { name: string; brandColor: string; timezone: string; kind: string; assistant: boolean };
@@ -60,7 +61,7 @@ export default function BookingWizard({ params }: { params: Promise<{ slug: stri
   const staffForService = useMemo(() => data?.staff.filter((s) => service?.staffIds.includes(s.id)) ?? [], [data, service]);
   const days = useMemo(() => Array.from({ length: 14 }, (_, i) => addDaysIso(zonedIsoDate(new Date(), tz), i)), [tz]);
   const { data: slots } = useApi<{ days: DaySlots[] }>(serviceId && step === 1 ? `/public/shops/${slug}/slots?serviceId=${serviceId}&date=${date}&days=1${staffId ? `&staffId=${staffId}` : ""}` : null);
-  const brand = shop?.shop.brandColor && shop.shop.brandColor !== "#d9d0b8" ? shop.shop.brandColor : "#1b263b";
+  const brand = shopAccent(shop?.shop.brandColor);
   const Back = locale === "fa" ? ArrowRight : ArrowLeft;
 
   async function book() {

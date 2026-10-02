@@ -13,6 +13,7 @@ import { latinDigits, money, time } from "@/lib/format";
 import type { DictKey } from "@/lib/i18n";
 import { useI18n } from "@/lib/locale-client";
 import type { DaySlots } from "@/lib/types";
+import { PLATFORM_ACCENT } from "@/lib/brand";
 
 interface MyAppointment {
   id: string;
@@ -45,7 +46,7 @@ export default function MyPage() {
   const { t } = useI18n();
   const { data: me, error, mutate } = useApi<{ phone: string; name: string | null }>("/customer/me", { shouldRetryOnError: false });
   return (
-    <div data-theme="day" className="min-h-dvh bg-[var(--bg)] text-[var(--text-body)]" style={{ "--accent": "#1b263b" } as React.CSSProperties}>
+    <div data-theme="day" className="min-h-dvh bg-[var(--bg)] text-[var(--text-body)]" style={{ "--accent": PLATFORM_ACCENT } as React.CSSProperties}>
       <header className="border-b border-[var(--border)] bg-[var(--bg-elev)]">
         <div className="mx-auto flex h-14 max-w-2xl items-center justify-between px-4">
           <Link href="/"><Logo label={t("brand.name")} /></Link>

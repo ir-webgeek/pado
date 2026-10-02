@@ -15,10 +15,18 @@ export async function generateMetadata(): Promise<Metadata> {
   };
 }
 
-export const viewport: Viewport = { themeColor: "#0b1120", width: "device-width", initialScale: 1 };
+export const viewport: Viewport = {
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#f6f7f9" },
+    { media: "(prefers-color-scheme: dark)", color: "#0b1120" },
+  ],
+  width: "device-width",
+  initialScale: 1,
+};
 
-// applied before paint so the saved theme never flashes
-const themeScript = `try{var t=localStorage.getItem("theme");if(t)document.documentElement.dataset.theme=t}catch(e){}`;
+// Runs before paint so the theme never flashes. "day"/"night" are explicit choices; anything else
+// follows the OS and keeps following it when the OS switches.
+const themeScript = `document.documentElement.classList.add("js");try{var d=document.documentElement,m=matchMedia("(prefers-color-scheme: light)");window.__applyTheme=function(){var t=localStorage.getItem("theme");d.dataset.theme=t==="day"||t==="night"?t:m.matches?"day":"night"};__applyTheme();m.addEventListener("change",__applyTheme)}catch(e){}`;
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   const { locale } = await getT();

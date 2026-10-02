@@ -23,7 +23,7 @@ export function Button({
         size === "sm" && "h-8 px-3 text-xs",
         size === "md" && "h-10 px-4 text-sm",
         size === "lg" && "h-12 px-6 text-base",
-        variant === "primary" && "bg-[var(--accent)] text-[var(--accent-ink)] hover:brightness-105 shadow-[0_8px_24px_-10px_rgb(217_208_184/.6)]",
+        variant === "primary" && "bg-[var(--accent)] text-[var(--accent-ink)] hover:brightness-105 shadow-[0_8px_24px_-12px_var(--accent)]",
         variant === "secondary" && "border border-[var(--border-strong)] bg-[var(--surface-sunken)] text-[var(--text)] hover:bg-[var(--accent-soft)]",
         variant === "ghost" && "text-[var(--text-body)] hover:bg-[var(--surface-sunken)]",
         variant === "danger" && "bg-danger/15 text-danger border border-danger/30 hover:bg-danger/25",

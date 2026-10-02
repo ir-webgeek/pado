@@ -9,6 +9,7 @@ import { api, useApi } from "@/lib/api";
 import { money, time } from "@/lib/format";
 import type { DictKey } from "@/lib/i18n";
 import { useI18n } from "@/lib/locale-client";
+import { shopAccent } from "@/lib/brand";
 
 interface BookingResp {
   booking: { code: string; status: string; paymentStatus: string; startsAt: string; endsAt: string; price: number; discountTotal: number; depositAmount: number; paidAmount: number; holdUntil: string | null };
@@ -40,7 +41,7 @@ function Booking({ code }: { code: string }) {
   if (!data) return <Spinner className="mx-auto mt-20" />;
   const b = data.booking;
   const tz = data.shop.timezone;
-  const brand = data.shop.brandColor !== "#d9d0b8" ? data.shop.brandColor : "#1b263b";
+  const brand = shopAccent(data.shop.brandColor);
   const due = b.depositAmount > 0 && b.paymentStatus !== "paid" && b.status === "pending";
   const canCancel = ["pending", "confirmed"].includes(b.status) && new Date(b.startsAt).getTime() - Date.now() > data.policy.cancelWindowMin * 60_000;
   const paid = sp.get("paid");

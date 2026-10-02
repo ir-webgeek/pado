@@ -198,7 +198,10 @@ export default function PanelLayout({ children }: { children: React.ReactNode })
                 <ThemeToggle />
               </div>
             </div>
-            {children}
+            {/* keyed by route so each page enters with the same soft rise */}
+            <div key={pathname} className="animate-rise">
+              {children}
+            </div>
           </main>
         </div>
 
