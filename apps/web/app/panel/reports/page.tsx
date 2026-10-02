@@ -99,6 +99,7 @@ interface PerfResp {
   appointmentChannels: { channel: string; n: number }[];
   appointmentStatus: Record<string, number>;
   newCustomers: number;
+  fromDm: { orders: number; revenue: number; bookings: number };
 }
 
 function Performance({ q }: { q: string }) {
@@ -127,6 +128,11 @@ function Performance({ q }: { q: string }) {
           />
         )}
         <StatTile label={t("rp.newCustomers")} value={num(data.newCustomers, locale)} />
+        <StatTile
+          label={t("rp.fromDm")}
+          value={store ? m(data.fromDm.revenue) : num(data.fromDm.bookings, locale)}
+          sub={[store && `${num(data.fromDm.orders, locale)} ${t("rp.orders")}`, bookings && `${num(data.fromDm.bookings, locale)} ${t("rp.bookings")}`].filter(Boolean).join(" · ")}
+        />
       </div>
       <div className="grid gap-4 lg:grid-cols-2">
         {bookings && (

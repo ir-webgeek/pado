@@ -4,6 +4,7 @@ import { z } from "zod";
 import {
   appointments,
   categories,
+  conversations,
   customers,
   orders,
   payments,
@@ -26,6 +27,7 @@ import { createOrder, getOrderFull, prepareCheckout } from "../orders/service";
 import { attachReceipt, startAppointmentPayment, startOrderPayment, handleGatewayCallback } from "../payments/service";
 import { bookAppointment, customerCancelAppointment, getSlots, rescheduleAppointment } from "../appointments/service";
 import { aiAvailable } from "../agent/llm";
+import { verifyConversationToken } from "../automations/execute";
 import { handleInbound } from "../inbox/pipeline";
 
 type ShopRow = typeof shops.$inferSelect;
@@ -45,6 +47,29 @@ export const storefrontRoutes =
     }
 
     const slugParams = z.object({ slug: z.string() });
+
+    /** The chat a visitor came from (signed `ref` from a DM link), only if it belongs to this shop. */
+    async function dmConversation(shopId: string, ref: string | undefined) {
+      const id = verifyConversationToken(ref);
+      if (!id) return undefined;
+      const conv = await ctx.db.query.conversations.findFirst({ where: and(eq(conversations.id, id), eq(conversations.shopId, shopId)), columns: { id: true } });
+      return conv?.id;
+    }
+
+    // a page view on the shop's site that started from a DM link
+    app.post(
+      "/track",
+      { schema: { body: z.object({ ref: z.string().max(120), path: z.string().max(300).regex(/^\//) }) }, config: { rateLimit: { max: 60, timeWindow: "1 minute" } } },
+      async (req) => {
+        const id = verifyConversationToken(req.body.ref);
+        if (!id) return { ok: false };
+        await ctx.db
+          .update(conversations)
+          .set({ siteVisits: sql`${conversations.siteVisits} + 1`, lastSiteVisitAt: new Date(), lastSitePath: req.body.path })
+          .where(eq(conversations.id, id));
+        return { ok: true };
+      },
+    );
 
     app.get("/shops/:slug", { schema: { params: slugParams } }, async (req, reply) => {
       const shop = await shopOr404(req.params.slug);
@@ -224,10 +249,14 @@ export const storefrontRoutes =
     // cart -> order (stock is reserved immediately)
     app.post(
       "/shops/:slug/orders",
-      { schema: { params: slugParams, body: createOrderSchema.pick({ items: true, discountCode: true, note: true }) }, config: { rateLimit: { max: 20, timeWindow: "1 minute" } } },
+      {
+        schema: { params: slugParams, body: createOrderSchema.pick({ items: true, discountCode: true, note: true }).extend({ ref: z.string().max(120).optional() }) },
+        config: { rateLimit: { max: 20, timeWindow: "1 minute" } },
+      },
       async (req) => {
         const shop = await shopOr404(req.params.slug);
-        const order = await createOrder(ctx.db, ctx.queues, shop.id, { ...req.body, channel: "web", reserveMinutes: 60 }, { type: "customer" });
+        const { ref, ...body } = req.body;
+        const order = await createOrder(ctx.db, ctx.queues, shop.id, { ...body, channel: "web", reserveMinutes: 60 }, { type: "customer" }, await dmConversation(shop.id, ref));
         return { code: order.code, token: order.accessToken };
       },
     );
@@ -334,12 +363,16 @@ export const storefrontRoutes =
 
     app.post(
       "/shops/:slug/bookings",
-      { schema: { params: slugParams, body: createAppointmentSchema.omit({ channel: true }) }, config: { rateLimit: { max: 10, timeWindow: "1 minute" } } },
+      {
+        schema: { params: slugParams, body: createAppointmentSchema.omit({ channel: true }).extend({ ref: z.string().max(120).optional() }) },
+        config: { rateLimit: { max: 10, timeWindow: "1 minute" } },
+      },
       async (req) => {
         const shop = await shopOr404(req.params.slug);
-        const svc = await ctx.db.query.services.findFirst({ where: and(eq(services.id, req.body.serviceId), eq(services.shopId, shop.id)) });
+        const { ref, ...body } = req.body;
+        const svc = await ctx.db.query.services.findFirst({ where: and(eq(services.id, body.serviceId), eq(services.shopId, shop.id)) });
         if (!svc?.onlineBookable) throw notFound("service");
-        const appt = await bookAppointment(ctx.db, ctx.queues, shop.id, { ...req.body, channel: "web" }, { type: "customer" });
+        const appt = await bookAppointment(ctx.db, ctx.queues, shop.id, { ...body, channel: "web" }, { type: "customer" }, { conversationId: await dmConversation(shop.id, ref) });
         return { code: appt.code, token: appt.accessToken, status: appt.status, depositAmount: appt.depositAmount };
       },
     );

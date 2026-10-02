@@ -810,6 +810,10 @@ export const conversations = pgTable(
     unread: integer().notNull().default(0),
     lastMessageAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
     lastInboundAt: timestamp({ withTimezone: true }),
+    /** visits to the shop's site from links sent in this chat (utm_source=shopino_dm) */
+    siteVisits: integer().notNull().default(0),
+    lastSiteVisitAt: timestamp({ withTimezone: true }),
+    lastSitePath: text(),
     createdAt: createdAt(),
   },
   (t) => [uniqueIndex().on(t.shopId, t.channel, t.externalUserId), index().on(t.shopId, t.lastMessageAt)],

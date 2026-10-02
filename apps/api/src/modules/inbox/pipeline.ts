@@ -6,7 +6,7 @@ import type { Queues } from "../../lib/queues";
 import type { Redis } from "ioredis";
 import { agentAvailable, runAgent } from "../agent/agent";
 import { chargeAi } from "../agent/llm";
-import { applyThenMode, recordRuleHit, sendRuleMessages } from "../automations/execute";
+import { applyThenMode, dmTagText, recordRuleHit, sendRuleMessages } from "../automations/execute";
 import { matchRule, type Trigger } from "../automations/match";
 import { upsertCustomer } from "../customers/service";
 import { replyToComment, sendPrivateReply, sendText, type IgAccount } from "../instagram/client";
@@ -158,6 +158,7 @@ export async function handleInbound(db: Database, queues: Queues, redis: Redis, 
   const cost = await chargeAi(db, shop.id, result.usage, { type: "conversation", id: conv!.id });
 
   if (result.reply) {
+    result.reply = dmTagText(result.reply, conv!.id);
     const ids = await deliver(shop, msg.channel, msg.externalUserId, result.reply);
     await db.insert(messages).values({ shopId: shop.id, conversationId: conv!.id, direction: "out", sender: "agent", text: result.reply, externalId: ids[0], meta: { usage: result.usage, cost } });
   }

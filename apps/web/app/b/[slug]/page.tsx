@@ -15,6 +15,7 @@ import { useI18n } from "@/lib/locale-client";
 import { ServiceShowcase } from "@/components/service-media";
 import type { BeforeAfter, DaySlots } from "@/lib/types";
 import { shopAccent } from "@/lib/brand";
+import { getDmRef } from "@/components/dm-ref";
 
 interface ShopResp {
   shop: { name: string; brandColor: string; timezone: string; kind: string; assistant: boolean };
@@ -71,7 +72,7 @@ export default function BookingWizard({ params }: { params: Promise<{ slug: stri
     try {
       const r = await api<{ code: string; token: string; depositAmount: number }>(`/public/shops/${slug}/bookings`, {
         method: "POST",
-        json: { serviceId, staffId: staffId || undefined, startsAt: slot, customer: { name, phone: latinDigits(phone) }, note: note || undefined },
+        json: { serviceId, staffId: staffId || undefined, startsAt: slot, customer: { name, phone: latinDigits(phone) }, note: note || undefined, ref: getDmRef() },
       });
       router.push(`/b/booking/${r.code}?t=${r.token}${r.depositAmount ? "&pay=1" : ""}`);
     } catch (e) {

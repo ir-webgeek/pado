@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import localFont from "next/font/local";
 import { dirOf } from "@/lib/i18n";
+import { DmRefTracker } from "@/components/dm-ref";
 import { PwaSetup } from "@/components/pwa";
 import { LocaleProvider } from "@/lib/locale-client";
 import { getT } from "@/lib/locale-server";
@@ -42,6 +43,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
       <body className="font-sans">
         <LocaleProvider locale={locale}>{children}</LocaleProvider>
         <PwaSetup />
+        <DmRefTracker />
       </body>
     </html>
   );

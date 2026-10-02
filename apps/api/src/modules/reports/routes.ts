@@ -197,7 +197,7 @@ export const reportRoutes =
         const inRange = and(eq(appointments.shopId, shopId), gte(appointments.startsAt, from), lt(appointments.startsAt, to));
         const paidOrders = and(eq(orders.shopId, shopId), PAID, gte(orders.paidAt, from), lt(orders.paidAt, to));
         const done = sql`${appointments.status} = 'completed'`;
-        const [staffRows, serviceRows, productRows, orderChannels, apptChannels, statusRows, [fresh]] = await Promise.all([
+        const [staffRows, serviceRows, productRows, orderChannels, apptChannels, statusRows, [fresh], [dmOrders], [dmBookings]] = await Promise.all([
           ctx.db
             .select({
               id: staff.id,
@@ -250,6 +250,15 @@ export const reportRoutes =
             .select({ n: sql<number>`count(*)::int` })
             .from(customers)
             .where(and(eq(customers.shopId, shopId), gte(customers.createdAt, from), lt(customers.createdAt, to))),
+          // placed on the site by someone who arrived through a DM link
+          ctx.db
+            .select({ n: sql<number>`count(*)::int`, total: sql<number>`coalesce(sum(${orders.total}), 0)::bigint` })
+            .from(orders)
+            .where(and(paidOrders, eq(orders.channel, "web"), sql`${orders.conversationId} is not null`)),
+          ctx.db
+            .select({ n: sql<number>`count(*)::int` })
+            .from(appointments)
+            .where(and(inRange, eq(appointments.channel, "web"), sql`${appointments.conversationId} is not null`, sql`${appointments.status} <> 'cancelled'`)),
         ]);
         const n = (v: unknown) => Number(v ?? 0);
         return {
@@ -260,6 +269,7 @@ export const reportRoutes =
           appointmentChannels: apptChannels,
           appointmentStatus: Object.fromEntries(statusRows.map((s) => [s.status, s.n])),
           newCustomers: fresh?.n ?? 0,
+          fromDm: { orders: dmOrders?.n ?? 0, revenue: n(dmOrders?.total), bookings: dmBookings?.n ?? 0 },
         };
       },
     );
