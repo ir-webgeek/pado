@@ -49,6 +49,11 @@
   --accent-soft: rgb(217 208 184 / 0.14);
   --ring: #aebbd0;
   --shadow: 0 1px 2px #0000004d, 0 12px 32px -8px #00000080;
+  /* chart series, validated (CVD + contrast) against the card surface of each theme */
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --chart-grid: rgb(255 255 255 / 0.07);
+  --chart-axis: rgb(255 255 255 / 0.16);
   color-scheme: dark;
 }
 
@@ -68,6 +73,10 @@
   --accent-soft: rgb(27 38 59 / 0.08);
   --ring: #415a77;
   --shadow: 0 1px 2px #1b263b14, 0 12px 32px -12px #1b263b33;
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --chart-grid: #e1e0d9;
+  --chart-axis: #c3c2b7;
   color-scheme: light;
 }
 

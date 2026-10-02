@@ -3,7 +3,9 @@
 import clsx from "clsx";
 import {
   CalendarClock,
+  ChartColumn,
   ClipboardList,
+  Warehouse,
   Images,
   ShieldCheck,
   Sparkles,
@@ -50,6 +52,7 @@ const groups: { key: DictKey; items: NavItem[] }[] = [
       { href: "/panel", key: "p.dashboard", icon: LayoutGrid },
       { href: "/panel/orders", key: "p.orders", icon: ShoppingBag, kinds: ["retail", "hybrid"] },
       { href: "/panel/products", key: "p.products", icon: Package, kinds: ["retail", "hybrid"] },
+      { href: "/panel/inventory", key: "p.inventory", icon: Warehouse, kinds: ["retail", "hybrid"] },
     ],
   },
   {
@@ -71,7 +74,10 @@ const groups: { key: DictKey; items: NavItem[] }[] = [
   },
   {
     key: "p.group.growth",
-    items: [{ href: "/panel/customers", key: "p.customers", icon: Users }],
+    items: [
+      { href: "/panel/customers", key: "p.customers", icon: Users },
+      { href: "/panel/reports", key: "p.reports", icon: ChartColumn },
+    ],
   },
   { key: "p.group.account", items: [{ href: "/panel/settings", key: "p.settings", icon: Settings }] },
 ];
