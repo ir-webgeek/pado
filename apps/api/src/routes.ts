@@ -12,6 +12,8 @@ import { customerRoutes } from "./modules/customers/routes";
 import { discountRoutes } from "./modules/discounts/routes";
 import { inboxRoutes } from "./modules/inbox/routes";
 import { instagramWebhook } from "./modules/instagram/webhook";
+import { inventoryRoutes } from "./modules/inventory/routes";
+import { financeRoutes } from "./modules/finance/routes";
 import { orderRoutes } from "./modules/orders/routes";
 import { reportRoutes } from "./modules/reports/routes";
 import { shopRoutes } from "./modules/shops/routes";
@@ -42,6 +44,7 @@ export const routes =
     for (const r of [
       shopRoutes,
       catalogRoutes,
+      inventoryRoutes,
       orderRoutes,
       customerRoutes,
       discountRoutes,
@@ -50,6 +53,7 @@ export const routes =
       walletRoutes,
       campaignRoutes,
       reportRoutes,
+      financeRoutes,
       uploadRoutes,
       pricingRoutes,
       automationRoutes,

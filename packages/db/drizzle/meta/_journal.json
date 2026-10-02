@@ -43,6 +43,20 @@
       "when": 1790971135225,
       "tag": "0005_service_media",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1790971608463,
+      "tag": "0006_stock_receipts",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1790971716537,
+      "tag": "0007_expenses",
+      "breakpoints": true
     }
   ]
 }

@@ -297,6 +297,8 @@ export const productVariants = pgTable(
     compareAtPrice: money(),
     /** optional USD price in cents; when the shop enables USD pricing, `price` is derived from it */
     priceUsdCents: integer(),
+    /** weighted-average purchase cost, updated by goods receipts */
+    costPrice: money(),
     stock: integer().notNull().default(0),
     reserved: integer().notNull().default(0),
     lowStockThreshold: integer().notNull().default(3),
@@ -330,6 +332,55 @@ export const inventoryMovements = pgTable(
     createdAt: createdAt(),
   },
   (t) => [index().on(t.variantId, t.createdAt), index().on(t.shopId, t.createdAt)],
+);
+
+/** Goods received from a supplier: raises stock and the weighted-average cost of each variant. */
+export const stockReceipts = pgTable(
+  "stock_receipts",
+  {
+    id: id(),
+    shopId: shopRef(),
+    code: text().notNull(),
+    supplier: text().notNull().default(""),
+    note: text(),
+    receivedAt: timestamp({ withTimezone: true }).notNull(),
+    total: money().notNull(),
+    createdBy: uuid(),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex().on(t.shopId, t.code), index().on(t.shopId, t.receivedAt)],
+);
+
+export const stockReceiptItems = pgTable(
+  "stock_receipt_items",
+  {
+    id: id(),
+    receiptId: uuid()
+      .notNull()
+      .references(() => stockReceipts.id, { onDelete: "cascade" }),
+    variantId: uuid()
+      .notNull()
+      .references(() => productVariants.id, { onDelete: "restrict" }),
+    quantity: integer().notNull(),
+    unitCost: money().notNull(),
+  },
+  (t) => [index().on(t.receiptId), check("receipt_qty_positive", sql`${t.quantity} > 0`), check("receipt_cost_non_negative", sql`${t.unitCost} >= 0`)],
+);
+
+/** Operating costs entered by the shop (rent, salaries, materials, ...), for the profit report. */
+export const expenses = pgTable(
+  "expenses",
+  {
+    id: id(),
+    shopId: shopRef(),
+    category: text().notNull(),
+    amount: money().notNull(),
+    spentAt: timestamp({ withTimezone: true }).notNull(),
+    note: text(),
+    createdBy: uuid(),
+    createdAt: createdAt(),
+  },
+  (t) => [index().on(t.shopId, t.spentAt), check("expense_positive", sql`${t.amount} > 0`)],
 );
 
 // ---------------------------------------------------------------- customers & club
@@ -506,6 +557,8 @@ export const orderItems = pgTable(
     unitPrice: money().notNull(),
     quantity: integer().notNull(),
     total: money().notNull(),
+    /** variant cost at the moment of payment, for cost of goods sold */
+    unitCost: money(),
   },
   (t) => [index().on(t.orderId), index().on(t.productId)],
 );

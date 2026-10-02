@@ -15,6 +15,12 @@ export function formatTomanShort(amount: Toman, locale: "fa" | "en" = "fa"): str
   return fmt(amount);
 }
 
+/** Weighted-average unit cost after receiving `qty` units at `unitCost` on top of existing stock. */
+export function weightedCost(stock: number, cost: Toman | null, qty: number, unitCost: Toman): Toman {
+  if (cost === null || stock <= 0) return unitCost;
+  return Math.round((stock * cost + qty * unitCost) / (stock + qty));
+}
+
 export function percentOf(amount: Toman, percent: number): Toman {
   return Math.round((amount * percent) / 100);
 }

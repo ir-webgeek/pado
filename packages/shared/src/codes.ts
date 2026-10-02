@@ -13,6 +13,8 @@ export function randomCode(length = 10): string {
 export const orderCode = () => `SHP-${randomCode(10)}`;
 /** Human-facing booking code, e.g. BK-4H8QZ2N7 */
 export const bookingCode = () => `BK-${randomCode(8)}`;
+/** Goods receipt code, e.g. RCV-7K3M9Q */
+export const receiptCode = () => `RCV-${randomCode(6)}`;
 
 export function normalizeIranPhone(input: string): string | null {
   const digits = input

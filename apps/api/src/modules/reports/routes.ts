@@ -187,4 +187,81 @@ export const reportRoutes =
       },
     );
 
+    /** Who and what performed in a period: staff, services, products, channels, new customers. */
+    app.get(
+      "/:shopId/reports/performance",
+      { preHandler: requireShop(ctx), schema: { params, querystring: z.object({ from: z.coerce.date(), to: z.coerce.date() }) } },
+      async (req) => {
+        const { from, to } = req.query;
+        const shopId = req.shop.id;
+        const inRange = and(eq(appointments.shopId, shopId), gte(appointments.startsAt, from), lt(appointments.startsAt, to));
+        const paidOrders = and(eq(orders.shopId, shopId), PAID, gte(orders.paidAt, from), lt(orders.paidAt, to));
+        const done = sql`${appointments.status} = 'completed'`;
+        const [staffRows, serviceRows, productRows, orderChannels, apptChannels, statusRows, [fresh]] = await Promise.all([
+          ctx.db
+            .select({
+              id: staff.id,
+              name: staff.name,
+              color: staff.color,
+              total: sql<number>`count(*)::int`,
+              completed: sql<number>`count(*) filter (where ${done})::int`,
+              noShow: sql<number>`count(*) filter (where ${appointments.status} = 'no_show')::int`,
+              cancelled: sql<number>`count(*) filter (where ${appointments.status} = 'cancelled')::int`,
+              revenue: sql<number>`coalesce(sum(${appointments.price} - ${appointments.discountTotal}) filter (where ${done}), 0)::bigint`,
+              minutes: sql<number>`coalesce(sum(extract(epoch from ${appointments.endsAt} - ${appointments.startsAt}) / 60) filter (where ${done}), 0)::int`,
+            })
+            .from(appointments)
+            .innerJoin(staff, eq(staff.id, appointments.staffId))
+            .where(inRange)
+            .groupBy(staff.id),
+          ctx.db
+            .select({
+              id: services.id,
+              name: services.name,
+              color: services.color,
+              completed: sql<number>`count(*) filter (where ${done})::int`,
+              revenue: sql<number>`coalesce(sum(${appointments.price} - ${appointments.discountTotal}) filter (where ${done}), 0)::bigint`,
+            })
+            .from(appointments)
+            .innerJoin(services, eq(services.id, appointments.serviceId))
+            .where(inRange)
+            .groupBy(services.id)
+            .orderBy(sql`5 desc`),
+          ctx.db
+            .select({ title: orderItems.title, sold: sql<number>`sum(${orderItems.quantity})::int`, revenue: sql<number>`sum(${orderItems.total})::bigint` })
+            .from(orderItems)
+            .innerJoin(orders, eq(orders.id, orderItems.orderId))
+            .where(paidOrders)
+            .groupBy(orderItems.title)
+            .orderBy(sql`3 desc`)
+            .limit(10),
+          ctx.db
+            .select({ channel: orders.channel, n: sql<number>`count(*)::int`, total: sql<number>`sum(${orders.total})::bigint` })
+            .from(orders)
+            .where(paidOrders)
+            .groupBy(orders.channel),
+          ctx.db
+            .select({ channel: appointments.channel, n: sql<number>`count(*)::int` })
+            .from(appointments)
+            .where(and(inRange, sql`${appointments.status} <> 'cancelled'`))
+            .groupBy(appointments.channel),
+          ctx.db.select({ status: appointments.status, n: sql<number>`count(*)::int` }).from(appointments).where(inRange).groupBy(appointments.status),
+          ctx.db
+            .select({ n: sql<number>`count(*)::int` })
+            .from(customers)
+            .where(and(eq(customers.shopId, shopId), gte(customers.createdAt, from), lt(customers.createdAt, to))),
+        ]);
+        const n = (v: unknown) => Number(v ?? 0);
+        return {
+          staff: staffRows.map((s) => ({ ...s, revenue: n(s.revenue) })).sort((a, b) => b.revenue - a.revenue),
+          services: serviceRows.map((s) => ({ ...s, revenue: n(s.revenue) })),
+          products: productRows.map((p) => ({ ...p, revenue: n(p.revenue) })),
+          orderChannels: orderChannels.map((c) => ({ ...c, total: n(c.total) })),
+          appointmentChannels: apptChannels,
+          appointmentStatus: Object.fromEntries(statusRows.map((s) => [s.status, s.n])),
+          newCustomers: fresh?.n ?? 0,
+        };
+      },
+    );
+
   };

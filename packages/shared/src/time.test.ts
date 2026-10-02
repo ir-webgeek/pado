@@ -1,6 +1,18 @@
 import { describe, expect, it } from "vitest";
 import { addDaysIso, isoToJalali, jalaliMonthLength, jalaliToIso, tzOffsetMinutes, weekdayOfIso, zonedIsoDate, zonedToUtc } from "./time";
 import { normalizeIranPhone } from "./codes";
+import { weightedCost } from "./money";
+
+describe("weighted cost", () => {
+  it("averages new receipts into existing stock", () => {
+    expect(weightedCost(10, 100_000, 10, 200_000)).toBe(150_000);
+    expect(weightedCost(3, 90_000, 1, 100_000)).toBe(92_500);
+  });
+  it("uses the receipt cost when there is no prior cost or stock", () => {
+    expect(weightedCost(5, null, 2, 70_000)).toBe(70_000);
+    expect(weightedCost(0, 50_000, 4, 80_000)).toBe(80_000);
+  });
+});
 
 describe("jalali", () => {
   it("converts known dates", () => {

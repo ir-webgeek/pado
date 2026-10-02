@@ -109,6 +109,25 @@ export const stockAdjustSchema = z.object({
   note: z.string().max(200).optional(),
 });
 
+export const stockReceiptSchema = z.object({
+  supplier: z.string().max(120).default(""),
+  note: z.string().max(500).optional(),
+  receivedAt: z.coerce.date().optional(),
+  items: z
+    .array(z.object({ variantId: z.string().uuid(), quantity: z.number().int().min(1).max(1_000_000), unitCost: z.number().int().min(0) }))
+    .min(1)
+    .max(200)
+    .refine((items) => new Set(items.map((i) => i.variantId)).size === items.length, "each variant once per receipt"),
+});
+
+export const EXPENSE_CATEGORIES = ["rent", "salary", "materials", "marketing", "utilities", "shipping", "equipment", "tax", "other"] as const;
+export const expenseInputSchema = z.object({
+  category: z.enum(EXPENSE_CATEGORIES),
+  amount: z.number().int().min(1).max(100_000_000_000),
+  spentAt: z.coerce.date(),
+  note: z.string().max(300).optional(),
+});
+
 // ---------- orders ----------
 export const addressSchema = z.object({
   fullName: z.string().min(2).max(80),
@@ -313,3 +332,4 @@ export type ServiceInput = z.infer<typeof serviceInputSchema>;
 export type StaffInput = z.infer<typeof staffInputSchema>;
 export type CreateAppointmentInput = z.infer<typeof createAppointmentSchema>;
 export type ShopSettingsInput = z.infer<typeof updateShopSettingsSchema>;
+export type StockReceiptInput = z.infer<typeof stockReceiptSchema>;
