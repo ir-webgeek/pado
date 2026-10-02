@@ -70,6 +70,7 @@ export interface Customer {
   noShowCount: number;
   totalSpent: number;
   points: number;
+  walletBalance: number;
   segment: string;
   lastOrderAt: string | null;
   lastVisitAt: string | null;

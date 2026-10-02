@@ -12,7 +12,16 @@ interface Settings {
   loyalty: { enabled: boolean; tomanPerPoint: number; pointValue: number; expiryDays: number };
   vipRule: { minOrders: number; minSpend: number; withinDays: number };
   atRiskDays: number;
-  booking: { slotStepMin: number; minNoticeMin: number; maxAdvanceDays: number; cancelWindowMin: number; autoConfirm: boolean; reminderOffsetsMin: number[] };
+  booking: {
+    slotStepMin: number;
+    minNoticeMin: number;
+    maxAdvanceDays: number;
+    cancelWindowMin: number;
+    autoConfirm: boolean;
+    reminderOffsetsMin: number[];
+    customerReschedule: boolean;
+    refundToWallet: boolean;
+  };
   agent: { enabled: boolean; tone: string; rules: string; neverOfferDiscount: boolean; knowledge: string; consultOnWeb: boolean };
   cardToCard: { cardNumber: string; holder: string; bank: string };
   pricing: { usdEnabled: boolean; usdRate: number; markupPercent: number; roundTo: number; rateUpdatedAt: string | null; autoFetch: boolean };
@@ -159,7 +168,7 @@ function SettingsForm({ tab, data, onSaved }: { tab: Tab; data: ShopResp; onSave
             <Field label={t("s.maxAdvance")}>
               <Input inputMode="numeric" value={booking.maxAdvanceDays} onChange={(e) => setBooking({ ...booking, maxAdvanceDays: n(e.target.value) })} />
             </Field>
-            <Field label={t("s.cancelWindow")}>
+            <Field label={t("s.cancelWindow")} hint={t("s.cancelWindowHint")}>
               <Input inputMode="numeric" value={booking.cancelWindowMin} onChange={(e) => setBooking({ ...booking, cancelWindowMin: n(e.target.value) })} />
             </Field>
           </div>
@@ -171,6 +180,8 @@ function SettingsForm({ tab, data, onSaved }: { tab: Tab; data: ShopResp; onSave
             />
           </Field>
           <Toggle checked={booking.autoConfirm} onChange={(v) => setBooking({ ...booking, autoConfirm: v })} label={t("s.autoConfirm")} />
+          <Toggle checked={booking.customerReschedule} onChange={(v) => setBooking({ ...booking, customerReschedule: v })} label={t("s.customerReschedule")} />
+          <Toggle checked={booking.refundToWallet} onChange={(v) => setBooking({ ...booking, refundToWallet: v })} label={t("s.refundToWallet")} />
         </>
       )}
       {tab === "loyalty" && (

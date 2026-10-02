@@ -471,17 +471,21 @@ function AppointmentModal({ appt, tz, onClose, onChanged }: { appt: Appointment;
             <span className="flex-1 text-warning">
               {t("ap.refund")} · {money(appt.paidAmount, locale)}
             </span>
-            {(["refunded", "kept"] as const).map((st) => (
+            {(["wallet", "refunded", "kept"] as const).map((st) => (
               <Button
                 key={st}
                 size="sm"
-                variant={st === "refunded" ? "primary" : "secondary"}
+                variant={st === "wallet" ? "primary" : "secondary"}
                 onClick={async () => {
-                  await api(`/shops/${shop.id}/appointments/${appt.id}/refund`, { method: "POST", json: { status: st } });
-                  onChanged();
+                  try {
+                    await api(`/shops/${shop.id}/appointments/${appt.id}/refund`, { method: "POST", json: { status: st } });
+                    onChanged();
+                  } catch (e) {
+                    setError(e);
+                  }
                 }}
               >
-                {t(st === "refunded" ? "ap.refunded" : "ap.kept")}
+                {t(st === "wallet" ? "w.toWallet" : st === "refunded" ? "ap.refunded" : "ap.kept")}
               </Button>
             ))}
           </div>

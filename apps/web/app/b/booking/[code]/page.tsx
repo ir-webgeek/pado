@@ -14,9 +14,9 @@ interface BookingResp {
   booking: { code: string; status: string; paymentStatus: string; startsAt: string; endsAt: string; price: number; discountTotal: number; depositAmount: number; paidAmount: number; holdUntil: string | null };
   service: { name: string; durationMin: number };
   staff: { name: string; title: string };
-  customer: { name: string | null };
+  customer: { name: string | null; walletBalance: number };
   shop: { name: string; slug: string; brandColor: string; timezone: string };
-  policy: { cancelWindowMin: number };
+  policy: { cancelWindowMin: number; refundToWallet: boolean };
   paymentMethods: string[];
 }
 
@@ -36,6 +36,7 @@ function Booking({ code }: { code: string }) {
   const { data, mutate } = useApi<BookingResp>(`/public/bookings/${code}?t=${encodeURIComponent(token)}`);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
+  const [note, setNote] = useState<string | null>(null);
   if (!data) return <Spinner className="mx-auto mt-20" />;
   const b = data.booking;
   const tz = data.shop.timezone;
@@ -44,11 +45,11 @@ function Booking({ code }: { code: string }) {
   const canCancel = ["pending", "confirmed"].includes(b.status) && new Date(b.startsAt).getTime() - Date.now() > data.policy.cancelWindowMin * 60_000;
   const paid = sp.get("paid");
 
-  const pay = async () => {
+  const pay = async (method: "gateway" | "wallet") => {
     setBusy(true);
     setError(null);
     try {
-      const r = await api<{ kind: string; url?: string }>(`/public/bookings/${code}/pay?t=${encodeURIComponent(token)}`, { method: "POST", json: { method: "gateway" } });
+      const r = await api<{ kind: string; url?: string }>(`/public/bookings/${code}/pay?t=${encodeURIComponent(token)}`, { method: "POST", json: { method } });
       if (r.url) window.location.href = r.url;
       else mutate();
     } catch (e) {
@@ -60,7 +61,9 @@ function Booking({ code }: { code: string }) {
     if (!confirm(t("bk.cancel") + "?")) return;
     setBusy(true);
     try {
-      await api(`/public/bookings/${code}/cancel?t=${encodeURIComponent(token)}`, { method: "POST", json: {} });
+      const r = await api<{ refund: "wallet" | "requested" | null }>(`/public/bookings/${code}/cancel?t=${encodeURIComponent(token)}`, { method: "POST", json: {} });
+      if (r.refund === "wallet") setNote(t("w.refunded"));
+      else if (r.refund === "requested") setNote(t("me.refundNote"));
       mutate();
     } catch (e) {
       setError(e);
@@ -109,10 +112,16 @@ function Booking({ code }: { code: string }) {
                 <p className="flex items-center gap-1.5 font-medium"><Clock className="size-4" /> {t("ap.deposit")}: {money(b.depositAmount, locale)}</p>
               </div>
             )}
+            {note && <p className="rounded-xl bg-info/10 px-3 py-2 text-info">{note}</p>}
             <ErrorNote error={error} />
             {due && (
-              <Button variant="primary" size="lg" className="w-full" loading={busy} onClick={pay}>
+              <Button variant="primary" size="lg" className="w-full" loading={busy} onClick={() => pay("gateway")}>
                 {t("bk.payDeposit")}
+              </Button>
+            )}
+            {due && data.paymentMethods.includes("wallet") && (
+              <Button size="lg" className="w-full" loading={busy} onClick={() => pay("wallet")}>
+                {t("w.payWith")} · {money(data.customer.walletBalance, locale)}
               </Button>
             )}
             {canCancel && (
