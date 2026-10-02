@@ -207,6 +207,10 @@ export const shops = pgTable(
     igAccessToken: text(),
     /** long-lived Instagram tokens last 60 days; a daily job refreshes them before this */
     igTokenExpiresAt: timestamp({ withTimezone: true }),
+    /** WooCommerce REST API (read-only key is enough for import) */
+    wooUrl: text(),
+    wooConsumerKey: text(),
+    wooConsumerSecret: text(),
     telegramChatId: text(),
     /** merchant Sheba (IR...) that receives the shop's share when split payments go live */
     settlementIban: text(),
@@ -371,6 +375,27 @@ export const stockReceiptItems = pgTable(
     unitCost: money().notNull(),
   },
   (t) => [index().on(t.receiptId), check("receipt_qty_positive", sql`${t.quantity} > 0`), check("receipt_cost_non_negative", sql`${t.unitCost} >= 0`)],
+);
+
+/** One WooCommerce catalog import run: progress and per-product errors for the panel. */
+export const wooImports = pgTable(
+  "woo_imports",
+  {
+    id: id(),
+    shopId: shopRef(),
+    status: text().notNull().default("queued"), // queued | running | done | failed
+    total: integer().notNull().default(0),
+    created: integer().notNull().default(0),
+    updated: integer().notNull().default(0),
+    skipped: integer().notNull().default(0),
+    errors: jsonb().$type<{ product: string; error: string }[]>().notNull().default([]),
+    options: jsonb().$type<{ unit: "toman" | "rial"; defaultStock: number; status: "active" | "draft" }>().notNull(),
+    createdBy: uuid(),
+    startedAt: timestamp({ withTimezone: true }),
+    finishedAt: timestamp({ withTimezone: true }),
+    createdAt: createdAt(),
+  },
+  (t) => [index().on(t.shopId, t.createdAt)],
 );
 
 /** Operating costs entered by the shop (rent, salaries, materials, ...), for the profit report. */

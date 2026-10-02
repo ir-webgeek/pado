@@ -66,9 +66,9 @@ export const shopRoutes =
     app.get("/:shopId", { preHandler: requireShop(ctx), schema: { params: shopParams } }, async (req) => {
       const shop = await ctx.db.query.shops.findFirst({ where: eq(shops.id, req.shop.id) });
       if (!shop) throw notFound("shop");
-      const { igAccessToken, ...rest } = shop;
+      const { igAccessToken, wooConsumerKey, wooConsumerSecret: _wooSecret, ...rest } = shop;
       return {
-        shop: { ...rest, settings: resolveShopSettings(shop.settings), instagramConnected: Boolean(igAccessToken), instagramOAuth: instagramOAuthConfigured() },
+        shop: { ...rest, settings: resolveShopSettings(shop.settings), instagramConnected: Boolean(igAccessToken), instagramOAuth: instagramOAuthConfigured(), wooConnected: Boolean(wooConsumerKey) },
         role: req.shop.role,
         plan: PLANS[shop.plan],
       };

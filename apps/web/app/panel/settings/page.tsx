@@ -322,6 +322,7 @@ function SettingsForm({ tab, data, onSaved }: { tab: Tab; data: ShopResp; onSave
             {shop.kind !== "retail" && <Toggle checked={alerts.onBooking} onChange={(v) => setAlerts({ ...alerts, onBooking: v })} label={t("al.booking")} />}
           </div>
           <InstagramConnect shop={data.shop} onChanged={onSaved} />
+          {shop.kind !== "services" && <WooConnect />}
           <details className="rounded-xl border border-[var(--border)] p-3">
             <summary className="cursor-pointer text-sm muted">{t("ig.manualToken")}</summary>
             <div className="mt-3 grid gap-3 sm:grid-cols-2">
@@ -408,6 +409,168 @@ function InstagramConnect({ shop: s, onChanged }: { shop: ShopResp["shop"]; onCh
         <p className={result === "connected" ? "rounded-lg bg-success/10 px-3 py-2 text-sm text-success" : "rounded-lg bg-danger/10 px-3 py-2 text-sm text-danger"}>
           {t(`ig.result.${result}` as DictKey)}
         </p>
+      )}
+      <ErrorNote error={error} />
+    </div>
+  );
+}
+
+interface WooImport {
+  id: string;
+  status: "queued" | "running" | "done" | "failed";
+  total: number;
+  created: number;
+  updated: number;
+  skipped: number;
+  errors: { product: string; error: string }[];
+  createdAt: string;
+}
+
+function WooConnect() {
+  const { t, locale } = useI18n();
+  const { shop } = useShop();
+  const { data, mutate } = useApi<{ connected: boolean; url: string | null; imports: WooImport[] }>(`/shops/${shop.id}/woocommerce`);
+  const [form, setForm] = useState({ url: "", key: "", secret: "" });
+  const [opts, setOpts] = useState({ unit: "toman" as "toman" | "rial", defaultStock: "0", status: "draft" as "active" | "draft" });
+  const [found, setFound] = useState<{ products: number; currency: string | null } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<unknown>(null);
+  const last = data?.imports[0];
+  const active = last && (last.status === "queued" || last.status === "running");
+  // poll only while a run is in progress
+  const { data: live } = useApi<WooImport>(active ? `/shops/${shop.id}/woocommerce/imports/${last.id}` : null, {
+    refreshInterval: 2000,
+    onSuccess: (r) => {
+      if (r.status === "done" || r.status === "failed") void mutate();
+    },
+  });
+  const run = live ?? last;
+  if (!data) return null;
+  const act = async (fn: () => Promise<unknown>) => {
+    setBusy(true);
+    setError(null);
+    try {
+      await fn();
+      await mutate();
+    } catch (e) {
+      setError(e);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const connect = () =>
+    act(async () => {
+      const r = await api<{ products: number; currency: string | null; suggestedUnit: "toman" | "rial" }>(`/shops/${shop.id}/woocommerce/connect`, { method: "POST", json: form });
+      setFound({ products: r.products, currency: r.currency });
+      setOpts((o) => ({ ...o, unit: r.suggestedUnit }));
+      setForm({ url: "", key: "", secret: "" });
+    });
+  const disconnect = () => {
+    if (!confirm(`${t("woo.disconnect")}?`)) return;
+    void act(() => api(`/shops/${shop.id}/woocommerce`, { method: "DELETE" }));
+  };
+  const start = () =>
+    act(() => api(`/shops/${shop.id}/woocommerce/import`, { method: "POST", json: { unit: opts.unit, status: opts.status, defaultStock: Number(latinDigits(opts.defaultStock)) || 0 } }));
+  return (
+    <div className="space-y-3 rounded-xl border border-[var(--border)] p-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <p className="text-sm font-semibold strong">{t("woo.title")}</p>
+          {data.connected ? (
+            <p className="mt-1 text-sm text-success" dir="auto">
+              ✓ <span dir="ltr">{data.url}</span>
+            </p>
+          ) : (
+            <p className="mt-1 text-xs muted">{t("woo.why")}</p>
+          )}
+        </div>
+        {data.connected && (
+          <Button size="sm" variant="ghost" onClick={disconnect}>
+            {t("woo.disconnect")}
+          </Button>
+        )}
+      </div>
+      {!data.connected ? (
+        <>
+          <p className="text-xs muted">{t("woo.howto")}</p>
+          <Field label={t("woo.url")}>
+            <Input dir="ltr" placeholder="https://example.com" value={form.url} onChange={(e) => setForm({ ...form, url: e.target.value })} />
+          </Field>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Field label="Consumer key">
+              <Input dir="ltr" placeholder="ck_..." value={form.key} onChange={(e) => setForm({ ...form, key: e.target.value })} />
+            </Field>
+            <Field label="Consumer secret">
+              <Input dir="ltr" type="password" placeholder="cs_..." value={form.secret} onChange={(e) => setForm({ ...form, secret: e.target.value })} />
+            </Field>
+          </div>
+          <div className="flex justify-end">
+            <Button variant="primary" loading={busy} disabled={!form.url || !form.key || !form.secret} onClick={connect}>
+              {t("woo.connect")}
+            </Button>
+          </div>
+        </>
+      ) : (
+        <>
+          {found && (
+            <p className="rounded-lg bg-success/10 px-3 py-2 text-sm text-success">
+              {t("woo.found").replace("{n}", String(found.products))}
+              {found.currency && <span dir="ltr"> ({found.currency})</span>}
+            </p>
+          )}
+          <div className="grid gap-3 sm:grid-cols-3">
+            <Field label={t("woo.unit")}>
+              <Select value={opts.unit} onChange={(e) => setOpts({ ...opts, unit: e.target.value as "toman" | "rial" })}>
+                <option value="toman">{t("woo.toman")}</option>
+                <option value="rial">{t("woo.rial")}</option>
+              </Select>
+            </Field>
+            <Field label={t("woo.stock")}>
+              <Input inputMode="numeric" value={opts.defaultStock} onChange={(e) => setOpts({ ...opts, defaultStock: e.target.value })} />
+            </Field>
+            <Field label={t("woo.status")}>
+              <Select value={opts.status} onChange={(e) => setOpts({ ...opts, status: e.target.value as "active" | "draft" })}>
+                <option value="draft">{t("woo.draft")}</option>
+                <option value="active">{t("woo.active")}</option>
+              </Select>
+            </Field>
+          </div>
+          <p className="text-xs muted">{t("woo.note")}</p>
+          <div className="flex justify-end">
+            <Button variant="primary" loading={busy || Boolean(active)} onClick={start}>
+              {last ? t("woo.reimport") : t("woo.import")}
+            </Button>
+          </div>
+          {run && (
+            <div className="space-y-2 rounded-lg bg-[var(--surface-sunken)] p-3 text-sm">
+              <p className="flex flex-wrap items-center justify-between gap-2">
+                <span className="strong">{t(`woo.st.${run.status}` as DictKey)}</span>
+                <span className="text-xs muted">{dateTime(run.createdAt, locale)}</span>
+              </p>
+              {run.total > 0 && (
+                <div className="h-1.5 overflow-hidden rounded-full bg-[var(--border)]" role="progressbar" aria-valuemin={0} aria-valuemax={run.total} aria-valuenow={run.created + run.updated + run.skipped + run.errors.length}>
+                  <div className="h-full rounded-full bg-[var(--accent)] transition-[width]" style={{ width: `${Math.min(100, ((run.created + run.updated + run.skipped + run.errors.length) / run.total) * 100)}%` }} />
+                </div>
+              )}
+              <p className="num text-xs muted">
+                {t("woo.created")} {run.created} · {t("woo.updated")} {run.updated} · {t("woo.skipped")} {run.skipped} · {t("woo.failed")} {run.errors.length}
+                {run.total > 0 && ` / ${run.total}`}
+              </p>
+              {run.errors.length > 0 && (
+                <details>
+                  <summary className="cursor-pointer text-xs text-danger">{t("woo.errors")}</summary>
+                  <ul className="mt-2 space-y-1 text-xs">
+                    {run.errors.map((e, i) => (
+                      <li key={i}>
+                        <span className="strong">{e.product}</span>: <span dir="ltr">{e.error}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              )}
+            </div>
+          )}
+        </>
       )}
       <ErrorNote error={error} />
     </div>

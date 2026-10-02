@@ -20,6 +20,7 @@ import { reportRoutes } from "./modules/reports/routes";
 import { shopRoutes } from "./modules/shops/routes";
 import { payCallbackRoutes, storefrontRoutes } from "./modules/storefront/routes";
 import { walletRoutes } from "./modules/wallet/routes";
+import { woocommerceRoutes } from "./modules/woocommerce/routes";
 import { adminRoutes } from "./modules/admin/routes";
 import { automationRoutes } from "./modules/automations/routes";
 import { customerRoutes as customerPortalRoutes } from "./modules/customer/routes";
@@ -61,6 +62,7 @@ export const routes =
       formRoutes,
       knowledgeRoutes,
       instagramImportRoutes,
+      woocommerceRoutes,
       instagramOAuthStartRoutes,
       landingRoutes,
     ]) {

@@ -71,6 +71,13 @@
       "when": 1790973678521,
       "tag": "0009_dm_site_visits",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1790973923837,
+      "tag": "0010_woocommerce",
+      "breakpoints": true
     }
   ]
 }

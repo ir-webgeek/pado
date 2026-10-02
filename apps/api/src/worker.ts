@@ -22,6 +22,7 @@ import { expireOrderIfDue } from "./modules/orders/service";
 import { refreshUsdRateFromSource } from "./modules/pricing/service";
 import { analyzeMedia } from "./modules/instagram/importer";
 import { refreshInstagramTokens } from "./modules/instagram/token-refresh";
+import { runWooImport } from "./modules/woocommerce/import";
 
 const { db, client } = createDb(env.DATABASE_URL, { max: 10 });
 const connection = createRedis({ forWorker: true });
@@ -71,6 +72,7 @@ const handlers: Handlers = {
   "pricing.refresh-usd": () => refreshUsdRateFromSource(db),
   "instagram.analyze": ({ shopId, mediaRowIds }) => analyzeMedia(db, shopId, mediaRowIds),
   "instagram.refresh-tokens": () => refreshInstagramTokens(db),
+  "woocommerce.import": ({ importId }) => runWooImport(db, importId),
 };
 
 const process = (job: Job) => {
