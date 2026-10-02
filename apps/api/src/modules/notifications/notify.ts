@@ -18,7 +18,22 @@ type AlertKind = "onHandoff" | "onOrder" | "onBooking";
 async function alertManager(shop: ShopRow, kind: AlertKind, text: string) {
   const { alerts } = resolveShopSettings(shop.settings);
   if (!alerts[kind] || !alerts.phone) return;
-  await sendSms(alerts.phone, text);
+  const r = await sendSms(alerts.phone, text);
+  if (!r.ok) throw new Error("sms provider rejected the message");
+}
+
+/**
+ * Claims a dedupe key, then sends. A failed send releases the key and rethrows, so the job's retry
+ * sends again instead of finding the key taken and silently dropping the message.
+ */
+async function sendOnce(redis: Redis | undefined, key: string, ttlSec: number, send: () => Promise<void>) {
+  if (redis && (await redis.set(key, "1", "EX", ttlSec, "NX")) !== "OK") return;
+  try {
+    await send();
+  } catch (err) {
+    if (redis) await redis.del(key);
+    throw err;
+  }
 }
 
 const HANDOFF_REASONS: Record<string, string> = {
@@ -34,11 +49,12 @@ export async function notifyHandoff(db: Database, redis: Redis, conversationId: 
   if (!conv) return;
   const shop = await db.query.shops.findFirst({ where: eq(shops.id, conv.shopId) });
   if (!shop) return;
-  if ((await redis.set(`alert:handoff:${conv.id}`, "1", "EX", 1800, "NX")) !== "OK") return;
   const customer = conv.customerId ? await db.query.customers.findFirst({ where: eq(customers.id, conv.customerId) }) : undefined;
   const who = customer?.name ?? (conv.username ? `@${conv.username}` : "یک مشتری");
   const why = HANDOFF_REASONS[reason] ?? reason.slice(0, 80);
-  await alertManager(shop, "onHandoff", `${shop.name}: ${who} در دایرکت به مشاور نیاز دارد (${why}). پاسخ: ${env.PUBLIC_WEB_URL}/panel/inbox`);
+  await sendOnce(redis, `alert:handoff:${conv.id}`, 1800, () =>
+    alertManager(shop, "onHandoff", `${shop.name}: ${who} در دایرکت به مشاور نیاز دارد (${why}). پاسخ: ${env.PUBLIC_WEB_URL}/panel/inbox`),
+  );
 }
 
 async function orderCtx(db: Database, orderId: string) {
@@ -51,12 +67,20 @@ async function orderCtx(db: Database, orderId: string) {
   return { o, shop: shop!, customer, link: `${env.PUBLIC_WEB_URL}/o/${o.code}?t=${o.accessToken}` };
 }
 
-export async function notifyOrderPaid(db: Database, orderId: string) {
+export async function notifyOrderPaid(db: Database, orderId: string, redis?: Redis) {
   const c = await orderCtx(db, orderId);
   if (!c) return;
   const phone = c.o.address?.phone ?? c.customer?.phone;
-  if (phone && !c.customer?.smsOptOut) await sendSms(phone, `${c.shop.name}: سفارش ${c.o.code} ثبت و پرداخت شد. پیگیری: ${c.link}`);
-  await alertManager(c.shop, "onOrder", `${c.shop.name}: سفارش جدید ${c.o.code} به مبلغ ${formatToman(c.o.total)} پرداخت شد. ${env.PUBLIC_WEB_URL}/panel/orders/${c.o.id}`);
+  // keyed so a retry after a later step fails (e.g. Telegram) does not text the customer twice
+  if (phone && !c.customer?.smsOptOut) {
+    await sendOnce(redis, `sms:order-paid:${c.o.id}`, 7 * 86400, async () => {
+      const r = await sendSms(phone, `${c.shop.name}: سفارش ${c.o.code} ثبت و پرداخت شد. پیگیری: ${c.link}`);
+      if (!r.ok) throw new Error("sms provider rejected the message");
+    });
+  }
+  await sendOnce(redis, `alert:order:${c.o.id}`, 7 * 86400, () =>
+    alertManager(c.shop, "onOrder", `${c.shop.name}: سفارش جدید ${c.o.code} به مبلغ ${formatToman(c.o.total)} پرداخت شد. ${env.PUBLIC_WEB_URL}/panel/orders/${c.o.id}`),
+  );
   if (c.shop.telegramChatId) {
     await sendTelegram(
       c.shop.telegramChatId,
@@ -104,15 +128,20 @@ export async function notifyAppointmentBooked(db: Database, appointmentId: strin
   if (!c || c.a.status === "cancelled") return;
   const when = timeFa(c.a.startsAt, c.shop.timezone);
   // this job runs on create, confirm, payment and reschedule: text the customer once per status + time
-  const fresh = !redis || (await redis.set(`sms:booking:${c.a.id}:${c.a.status}:${c.a.startsAt.getTime()}`, "1", "EX", 7 * 86400, "NX")) === "OK";
-  if (fresh && c.customer.phone && !c.customer.smsOptOut) {
+  const phone = c.customer.phone;
+  if (phone && !c.customer.smsOptOut) {
     const state = c.a.status === "confirmed" ? "تایید شد" : "ثبت شد و در انتظار تایید است";
-    await sendSms(c.customer.phone, `${c.shop.name}: نوبت ${c.svc.name} برای ${when} ${state}. ${c.link}`);
+    await sendOnce(redis, `sms:booking:${c.a.id}:${c.a.status}:${c.a.startsAt.getTime()}`, 7 * 86400, async () => {
+      const r = await sendSms(phone, `${c.shop.name}: نوبت ${c.svc.name} برای ${when} ${state}. ${c.link}`);
+      if (!r.ok) throw new Error("sms provider rejected the message");
+    });
   }
   // online bookings only (the shop entered the others itself), once per booking: this job also runs on
   // confirmation, payment and reschedule
-  if (redis && !["pos", "phone"].includes(c.a.channel) && (await redis.set(`alert:booking:${c.a.id}`, "1", "EX", 7 * 86400, "NX")) === "OK") {
-    await alertManager(c.shop, "onBooking", `${c.shop.name}: نوبت آنلاین ${c.a.code}، ${c.svc.name} با ${c.st.name}، ${when} (${c.customer.name ?? c.customer.phone ?? ""}).`);
+  if (redis && !["pos", "phone"].includes(c.a.channel)) {
+    await sendOnce(redis, `alert:booking:${c.a.id}`, 7 * 86400, () =>
+      alertManager(c.shop, "onBooking", `${c.shop.name}: نوبت آنلاین ${c.a.code}، ${c.svc.name} با ${c.st.name}، ${when} (${c.customer.name ?? c.customer.phone ?? ""}).`),
+    );
   }
   if (c.shop.telegramChatId) {
     await sendTelegram(

@@ -97,10 +97,11 @@ export const financeRoutes =
           )
           .groupBy(walletTransactions.kind),
         ctx.db.select({ total: sql<number>`coalesce(sum(${customers.walletBalance}), 0)::bigint` }).from(customers).where(eq(customers.shopId, shopId)),
+        // money that actually came in: store-credit redemptions were received when the credit was funded
         ctx.db
           .select({ method: payments.method, total: sql<number>`sum(${payments.amount})::bigint`, n: sql<number>`count(*)::int` })
           .from(payments)
-          .where(and(eq(payments.shopId, shopId), eq(payments.status, "paid"), isNotNull(payments.paidAt), gte(payments.paidAt, from), lt(payments.paidAt, to), sql`${payments.purpose} <> 'wallet_topup'`))
+          .where(and(eq(payments.shopId, shopId), eq(payments.status, "paid"), isNotNull(payments.paidAt), gte(payments.paidAt, from), lt(payments.paidAt, to), sql`${payments.purpose} <> 'wallet_topup'`, sql`${payments.method} <> 'wallet'`))
           .groupBy(payments.method),
         ctx.db.select({ day: day(orders.paidAt), total: sql<number>`sum(${orders.total})::bigint` }).from(orders).where(orderWhere).groupBy(sql`1`),
         ctx.db.select({ day: day(doneAt), total: sql<number>`sum(${appointments.price} - ${appointments.discountTotal})::bigint` }).from(appointments).where(apptDone).groupBy(sql`1`),

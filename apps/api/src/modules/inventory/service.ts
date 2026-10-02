@@ -80,8 +80,24 @@ export async function listReceipts(db: DbOrTx, shopId: string) {
     .limit(200);
 }
 
-/** Every variant with stock, cost and on-hand value (stock x average cost). */
+const VALUATION_ROWS = 5000;
+
+/**
+ * Variants with stock, cost and on-hand value (stock x average cost). Totals are aggregated over every
+ * variant; the row list is capped, and `truncated` says when it was.
+ */
 export async function stockValuation(db: DbOrTx, shopId: string) {
+  const scope = and(eq(productVariants.shopId, shopId), sql`${products.status} <> 'archived'`);
+  const [totals] = await db
+    .select({
+      count: sql<number>`count(*)::int`,
+      totalValue: sql<number>`coalesce(sum(${productVariants.costPrice} * ${productVariants.stock}), 0)::bigint`,
+      retailValue: sql<number>`coalesce(sum(${productVariants.price} * ${productVariants.stock}), 0)::bigint`,
+      missingCost: sql<number>`(count(*) filter (where ${productVariants.costPrice} is null and ${productVariants.stock} > 0))::int`,
+    })
+    .from(productVariants)
+    .innerJoin(products, eq(products.id, productVariants.productId))
+    .where(scope);
   const rows = await db
     .select({
       variantId: productVariants.id,
@@ -96,15 +112,16 @@ export async function stockValuation(db: DbOrTx, shopId: string) {
     })
     .from(productVariants)
     .innerJoin(products, eq(products.id, productVariants.productId))
-    .where(and(eq(productVariants.shopId, shopId), sql`${products.status} <> 'archived'`))
+    .where(scope)
     .orderBy(products.title, productVariants.position)
-    .limit(1000);
+    .limit(VALUATION_ROWS);
   const items = rows.map(({ attributes, ...r }) => ({ ...r, variantLabel: variantLabel(attributes), value: r.costPrice === null ? null : r.costPrice * r.stock }));
   return {
     items,
-    totalValue: items.reduce((s, i) => s + (i.value ?? 0), 0),
-    retailValue: items.reduce((s, i) => s + i.price * i.stock, 0),
-    missingCost: items.filter((i) => i.costPrice === null && i.stock > 0).length,
+    totalValue: Number(totals?.totalValue ?? 0),
+    retailValue: Number(totals?.retailValue ?? 0),
+    missingCost: totals?.missingCost ?? 0,
+    truncated: (totals?.count ?? 0) > items.length,
   };
 }
 

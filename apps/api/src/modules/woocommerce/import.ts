@@ -3,7 +3,7 @@ import { categories, productVariants, products, shops, wooImports, type Database
 import { slugify, upsertProduct } from "../catalog/service";
 import { copyImage } from "../instagram/importer";
 import { wooGet, type WooCreds } from "./client";
-import { mapSimple, mapVariation, stripHtml, variantKey, type MappedVariant, type WooProduct, type WooVariation } from "./map";
+import { mapSimple, mapVariation, stripHtml, variantKey, type MappedVariant, type WooProduct, type WooUnit, type WooVariation } from "./map";
 
 const PAGE = 50;
 const MAX_ERRORS = 50;
@@ -28,6 +28,12 @@ async function variationsOf(c: WooCreds, p: WooProduct) {
     if (page >= r.totalPages) break;
   }
   return out.filter((v) => (v.status ?? "publish") === "publish");
+}
+
+async function variantsOf(c: WooCreds, p: WooProduct, unit: WooUnit, defaultStock: number) {
+  const list = await variationsOf(c, p);
+  const sharing = list.filter((v) => v.manage_stock === "parent").length;
+  return list.map((v) => mapVariation(v, p, unit, defaultStock, sharing));
 }
 
 /**
@@ -59,7 +65,7 @@ export async function runWooImport(db: Database, importId: string) {
             counts.skipped++;
             continue;
           }
-          const mapped: MappedVariant[] = p.type === "simple" ? [mapSimple(p, unit, defaultStock)] : (await variationsOf(creds, p)).map((v) => mapVariation(v, p, unit, defaultStock));
+          const mapped: MappedVariant[] = p.type === "simple" ? [mapSimple(p, unit, defaultStock)] : await variantsOf(creds, p, unit, defaultStock);
           if (!mapped.length) {
             counts.skipped++;
             continue;

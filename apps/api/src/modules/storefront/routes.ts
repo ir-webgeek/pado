@@ -1,3 +1,4 @@
+import type { FastifyRequest } from "fastify";
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
@@ -6,6 +7,7 @@ import {
   categories,
   conversations,
   customers,
+  forms,
   orders,
   payments,
   productVariants,
@@ -20,8 +22,9 @@ import {
 import { PAYMENT_METHODS, planHas, completeOrderSchema, createAppointmentSchema, createOrderSchema, rescheduleSchema, slotQuerySchema } from "@shopino/shared";
 import type { Ctx } from "../../lib/context";
 import { TtlCache } from "../../lib/cache";
+import { customerPhone } from "../../lib/auth";
 import { safeEqual } from "../../lib/crypto";
-import { notFound } from "../../lib/errors";
+import { notFound, unauthorized } from "../../lib/errors";
 import { saveUpload } from "../../lib/uploads";
 import { createOrder, getOrderFull, prepareCheckout } from "../orders/service";
 import { attachReceipt, startAppointmentPayment, startOrderPayment, handleGatewayCallback } from "../payments/service";
@@ -56,6 +59,23 @@ export const storefrontRoutes =
       return conv?.id;
     }
 
+    /** Which shop a customer page belongs to: /s/:slug, /b/:slug, /b/booking/:code, /o/:code, /f/:id. */
+    async function shopOfPath(path: string): Promise<string | null> {
+      let parts: string[];
+      try {
+        parts = path.split("?")[0]!.split("/").map((p) => decodeURIComponent(p));
+      } catch {
+        return null;
+      }
+      const [, kind, a, b] = parts;
+      if (!a) return null;
+      if (kind === "o") return (await ctx.db.query.orders.findFirst({ where: eq(orders.code, a), columns: { shopId: true } }))?.shopId ?? null;
+      if (kind === "b" && a === "booking") return b ? ((await ctx.db.query.appointments.findFirst({ where: eq(appointments.code, b), columns: { shopId: true } }))?.shopId ?? null) : null;
+      if (kind === "s" || kind === "b") return (await ctx.db.query.shops.findFirst({ where: eq(shops.slug, a), columns: { id: true } }))?.id ?? null;
+      if (kind === "f" && /^[0-9a-f-]{36}$/i.test(a)) return (await ctx.db.query.forms.findFirst({ where: eq(forms.id, a), columns: { shopId: true } }))?.shopId ?? null;
+      return null;
+    }
+
     // a page view on the shop's site that started from a DM link
     app.post(
       "/track",
@@ -63,11 +83,15 @@ export const storefrontRoutes =
       async (req) => {
         const id = verifyConversationToken(req.body.ref);
         if (!id) return { ok: false };
-        await ctx.db
+        // the browser keeps one ref across shops, so count the view only on the conversation's own shop
+        const shopId = await shopOfPath(req.body.path);
+        if (!shopId) return { ok: false };
+        const [row] = await ctx.db
           .update(conversations)
           .set({ siteVisits: sql`${conversations.siteVisits} + 1`, lastSiteVisitAt: new Date(), lastSitePath: req.body.path })
-          .where(eq(conversations.id, id));
-        return { ok: true };
+          .where(and(eq(conversations.id, id), eq(conversations.shopId, shopId)))
+          .returning({ id: conversations.id });
+        return { ok: Boolean(row) };
       },
     );
 
@@ -265,6 +289,20 @@ export const storefrontRoutes =
     const orderParams = z.object({ code: z.string() });
     const tokenQuery = z.object({ t: z.string() });
 
+    /**
+     * Store credit belongs to a phone number, and an order/booking token only proves someone created
+     * that order (with any phone). Showing or spending the balance needs the customer portal session
+     * (OTP-verified) for the same phone.
+     */
+    function ownsWallet(req: FastifyRequest, phone: string | null | undefined) {
+      if (!phone) return false;
+      try {
+        return customerPhone(req) === phone;
+      } catch {
+        return false;
+      }
+    }
+
     async function orderWithToken(code: string, token: string) {
       const o = await getOrderFull(ctx.db, { code });
       if (!safeEqual(o.accessToken, token)) throw notFound("order");
@@ -280,13 +318,14 @@ export const storefrontRoutes =
         where: and(eq(payments.orderId, o.id), inArray(payments.status, ["initiated", "pending_review"]), eq(payments.method, "card_to_card")),
       });
       const { accessToken: _t, customer, events, ...order } = o;
+      const wallet = customer && ownsWallet(req, customer.phone) ? customer.walletBalance : 0;
       return {
         order: { ...order, timeline: events.map((e) => ({ type: e.type, at: e.createdAt })) },
-        customer: customer ? { name: customer.name, points: customer.points, walletBalance: customer.walletBalance } : null,
+        customer: customer ? { name: customer.name, points: customer.points, walletBalance: wallet } : null,
         shop: { name: shop!.name, slug: shop!.slug, brandColor: shop!.brandColor, logo: shop!.logo },
         shippingMethods: methods.map((m) => ({ id: m.id, name: m.name, price: m.price, freeOver: m.freeOver })),
         // the final total depends on shipping, so the page decides whether the wallet covers it
-        paymentMethods: ["gateway", ...(settings.cardToCard.cardNumber ? ["card_to_card"] : []), ...(customer && customer.walletBalance > 0 ? ["wallet"] : [])],
+        paymentMethods: ["gateway", ...(settings.cardToCard.cardNumber ? ["card_to_card"] : []), ...(wallet > 0 ? ["wallet"] : [])],
         loyalty: settings.loyalty.enabled ? { pointValue: settings.loyalty.pointValue } : null,
         pendingCardPayment: pending ? { id: pending.id, status: pending.status, card: settings.cardToCard } : null,
       };
@@ -297,6 +336,7 @@ export const storefrontRoutes =
       { schema: { params: orderParams, querystring: tokenQuery, body: completeOrderSchema }, config: { rateLimit: { max: 10, timeWindow: "1 minute" } } },
       async (req) => {
         const o = await orderWithToken(req.params.code, req.query.t);
+        if (req.body.paymentMethod === "wallet" && !ownsWallet(req, o.customer?.phone)) throw unauthorized("log in with this phone number to pay from your wallet");
         await ctx.db.transaction((tx) => prepareCheckout(tx, o.id, req.body));
         return startOrderPayment(ctx.db, ctx.queues, o.id);
       },
@@ -394,7 +434,7 @@ export const storefrontRoutes =
       const settings = resolveShopSettings(shop!.settings);
       const { accessToken: _t, internalNote: _n, ...booking } = a;
       const due = a.depositAmount > 0 ? a.depositAmount : a.price - a.discountTotal;
-      const wallet = cust?.walletBalance ?? 0;
+      const wallet = cust && ownsWallet(req, cust.phone) ? cust.walletBalance : 0;
       return {
         booking,
         service: { id: svc!.id, name: svc!.name, durationMin: svc!.durationMin },
@@ -412,6 +452,10 @@ export const storefrontRoutes =
       { schema: { params: orderParams, querystring: tokenQuery, body: z.object({ method: z.enum(PAYMENT_METHODS).default("gateway") }) } },
       async (req) => {
         const a = await bookingWithToken(req.params.code, req.query.t);
+        if (req.body.method === "wallet") {
+          const cust = await ctx.db.query.customers.findFirst({ where: eq(customers.id, a.customerId), columns: { phone: true } });
+          if (!ownsWallet(req, cust?.phone)) throw unauthorized("log in with this phone number to pay from your wallet");
+        }
         return startAppointmentPayment(ctx.db, ctx.queues, a.id, req.body.method);
       },
     );

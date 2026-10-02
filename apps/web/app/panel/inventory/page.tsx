@@ -28,6 +28,7 @@ interface Valuation {
   totalValue: number;
   retailValue: number;
   missingCost: number;
+  truncated: boolean;
 }
 interface ReceiptRow {
   id: string;
@@ -99,6 +100,7 @@ function StockTab({ data, onChanged }: { data: Valuation | undefined; onChanged:
       <Card className="!p-0">
         <div className="border-b border-[var(--border)] p-3">
           <Input placeholder={t("wh.search")} value={q} onChange={(e) => setQ(e.target.value)} className="max-w-sm" />
+          {data.truncated && <p className="mt-2 text-xs text-warning">{t("wh.truncated").replace("{n}", num(data.items.length, locale))}</p>}
         </div>
         {rows.length === 0 ? (
           <Empty title={t("rp.noData")} />

@@ -121,7 +121,11 @@ export function jalaliToIso(jy: number, jm: number, jd: number): string {
   for (let i = 0; i < 8; i++) {
     const j = isoToJalali(guess);
     const diff = j.jy === jy ? target - jalaliOrdinal(j.jm, j.jd) : Math.sign(jy - j.jy);
-    if (diff === 0) return guess;
+    if (diff === 0) {
+      // ordinals overlap across months (1/32 == 2/1), so the landing date must match exactly
+      if (j.jm !== jm || j.jd !== jd) break;
+      return guess;
+    }
     guess = addDaysIso(guess, diff);
   }
   throw new Error(`invalid jalali date ${jy}/${jm}/${jd}`);

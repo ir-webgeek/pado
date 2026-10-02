@@ -22,6 +22,12 @@ describe("woocommerce mapping", () => {
     const v = mapVariation({ id: 2, regular_price: "50000", manage_stock: "parent", attributes: [{ name: "Size", option: "M" }] }, parent, "toman", 3);
     expect(v).toMatchObject({ attributes: { Size: "M" }, price: 50000, stock: 9 });
   });
+  it("splits a shared parent stock pool instead of copying it into every variation", () => {
+    const parent = { ...base, type: "variable", stock_quantity: 10 };
+    const v = { id: 2, regular_price: "50000", manage_stock: "parent" as const, attributes: [{ name: "Size", option: "M" }] };
+    expect(mapVariation(v, parent, "toman", 3, 3).stock).toBe(3);
+    expect(mapVariation(v, { ...parent, stock_quantity: -2 }, "toman", 3, 3).stock).toBe(0);
+  });
   it("keys variants by sku, else by attributes regardless of order", () => {
     expect(variantKey({ sku: "A1", attributes: {} })).toBe("sku:A1");
     expect(variantKey({ attributes: { b: "2", a: "1" } })).toBe(variantKey({ attributes: { a: "1", b: "2" } }));

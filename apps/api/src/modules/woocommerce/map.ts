@@ -91,12 +91,18 @@ export function mapSimple(p: WooProduct, unit: WooUnit, defaultStock: number): M
   return { sku: sku(p.sku), attributes: {}, ...prices(p, unit), stock: stockOf(p.manage_stock, p.stock_quantity, p.stock_status, defaultStock) };
 }
 
-export function mapVariation(v: WooVariation, parent: WooProduct, unit: WooUnit, defaultStock: number): MappedVariant {
+/**
+ * `sharingParent` is how many of the product's variations draw on the parent's stock. Shopino tracks stock
+ * per variant, so a shared pool is split evenly (rounded down) rather than copied into each variant,
+ * which would multiply sellable units.
+ */
+export function mapVariation(v: WooVariation, parent: WooProduct, unit: WooUnit, defaultStock: number, sharingParent = 1): MappedVariant {
+  const parentShare = parent.stock_quantity == null ? null : Math.floor(Math.max(0, parent.stock_quantity) / Math.max(1, sharingParent));
   return {
     sku: sku(v.sku),
     attributes: Object.fromEntries((v.attributes ?? []).filter((a) => a.option).map((a) => [a.name.slice(0, 40), a.option.slice(0, 60)])),
     ...prices(v, unit),
-    stock: stockOf(v.manage_stock, v.stock_quantity, v.stock_status, defaultStock, parent.stock_quantity),
+    stock: stockOf(v.manage_stock, v.stock_quantity, v.stock_status, defaultStock, parentShare),
   };
 }
 

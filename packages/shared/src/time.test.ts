@@ -21,6 +21,10 @@ describe("jalali", () => {
     expect(jalaliToIso(1403, 12, 30)).toBe("2025-03-20");
     expect(jalaliToIso(1405, 7, 10)).toBe("2026-10-02");
   });
+  it("rejects days past the end of the month instead of rolling over", () => {
+    expect(() => jalaliToIso(1405, 1, 32)).toThrow();
+    expect(() => jalaliToIso(1405, 7, 31)).toThrow();
+  });
   it("round-trips every day across several years", () => {
     for (let d = "2020-01-01"; d < "2031-01-01"; d = addDaysIso(d, 1)) {
       const j = isoToJalali(d);
