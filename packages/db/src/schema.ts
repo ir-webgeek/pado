@@ -116,6 +116,8 @@ export interface ShopSettings {
     learnedStyle: string;
   };
   cardToCard: { cardNumber: string; holder: string; bank: string };
+  /** seller details printed on invoices and shipping labels */
+  invoice: { address: string; phone: string; postalCode: string; footer: string };
   /** optional USD-linked pricing: variant price = priceUsd x rate x (1 + markup), rounded */
   pricing: { usdEnabled: boolean; usdRate: number; markupPercent: number; roundTo: number; rateUpdatedAt: string | null; autoFetch: boolean };
 }
@@ -144,6 +146,7 @@ export const DEFAULT_SHOP_SETTINGS: ShopSettings = {
     learnedStyle: "",
   },
   cardToCard: { cardNumber: "", holder: "", bank: "" },
+  invoice: { address: "", phone: "", postalCode: "", footer: "" },
   pricing: { usdEnabled: false, usdRate: 0, markupPercent: 0, roundTo: 1000, rateUpdatedAt: null, autoFetch: false },
 };
 
@@ -159,6 +162,7 @@ export function resolveShopSettings(stored: PartialShopSettings | null | undefin
     booking: { ...DEFAULT_SHOP_SETTINGS.booking, ...s.booking },
     agent: { ...DEFAULT_SHOP_SETTINGS.agent, ...s.agent },
     cardToCard: { ...DEFAULT_SHOP_SETTINGS.cardToCard, ...s.cardToCard },
+    invoice: { ...DEFAULT_SHOP_SETTINGS.invoice, ...s.invoice },
     pricing: { ...DEFAULT_SHOP_SETTINGS.pricing, ...s.pricing },
   };
 }

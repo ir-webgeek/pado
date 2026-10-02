@@ -89,6 +89,28 @@ body {
   outline-offset: 2px;
 }
 
+/* order invoice / label: only the portal is printed, always black on white */
+@media screen {
+  .print-root {
+    display: none;
+  }
+}
+@media print {
+  body > *:not(.print-root) {
+    display: none !important;
+  }
+  html,
+  body {
+    background: #fff !important;
+  }
+  .print-root {
+    color: #000;
+    background: #fff;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+}
+
 @layer components {
   .glass {
     background: var(--surface);

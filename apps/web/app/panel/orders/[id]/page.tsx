@@ -1,7 +1,8 @@
 "use client";
 
-import { Check, Copy, Printer } from "lucide-react";
-import { use, useState } from "react";
+import { Check, Copy, Printer, Tag } from "lucide-react";
+import { use, useCallback, useState } from "react";
+import { OrderPrint, type PrintKind, type Seller } from "@/components/order-print";
 import { Badge, Button, Card, ErrorNote, Field, Input, PageHeader, Spinner, statusTone } from "@/components/ui";
 import { api, useApi } from "@/lib/api";
 import { dateTime, money, num } from "@/lib/format";
@@ -28,7 +29,16 @@ export default function OrderPage({ params }: { params: Promise<{ id: string }> 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const [copied, setCopied] = useState(false);
+  const [printing, setPrinting] = useState<PrintKind | null>(null);
+  const donePrinting = useCallback(() => setPrinting(null), []);
+  const { data: shopData } = useApi<{ shop: { name: string; logo: string | null; timezone: string; settings: { invoice: Seller["invoice"] } } }>(`/shops/${shop.id}`, {
+    revalidateOnFocus: false,
+  });
   if (!o) return <Spinner />;
+  const print = (kind: PrintKind) => {
+    api(`/shops/${shop.id}/orders/${o.id}/printed`, { method: "POST" }).catch(() => {});
+    setPrinting(kind);
+  };
 
   const move = async (status: string, extra: Record<string, string> = {}) => {
     setBusy(true);
@@ -54,12 +64,25 @@ export default function OrderPage({ params }: { params: Promise<{ id: string }> 
             <Button size="sm" onClick={() => (navigator.clipboard.writeText(o.link), setCopied(true))}>
               {copied ? <Check className="size-4" /> : <Copy className="size-4" />} {copied ? t("a.copied") : t("a.copy")}
             </Button>
-            <Button size="sm" onClick={() => (api(`/shops/${shop.id}/orders/${o.id}/printed`, { method: "POST" }), window.print())}>
-              <Printer className="size-4" />
+            <Button size="sm" disabled={!shopData} onClick={() => print("invoice")}>
+              <Printer className="size-4" /> {t("inv.print")}
             </Button>
+            {o.address && (
+              <Button size="sm" disabled={!shopData} onClick={() => print("label")}>
+                <Tag className="size-4" /> {t("inv.printLabel")}
+              </Button>
+            )}
           </>
         }
       />
+      {printing && shopData && (
+        <OrderPrint
+          kind={printing}
+          order={o}
+          seller={{ name: shopData.shop.name, logo: shopData.shop.logo, timezone: shopData.shop.timezone, invoice: shopData.shop.settings.invoice }}
+          onDone={donePrinting}
+        />
+      )}
       <div className="grid gap-4 lg:grid-cols-3">
         <div className="space-y-4 lg:col-span-2">
           <Card>
@@ -164,7 +187,7 @@ export default function OrderPage({ params }: { params: Promise<{ id: string }> 
               <ul className="space-y-2 text-sm">
                 {o.payments.map((p) => (
                   <li key={p.id} className="flex items-center justify-between">
-                    <span>{p.method === "card_to_card" ? t("co.cardToCard") : t("co.gateway")}</span>
+                    <span>{t(`pm.${p.method}` as DictKey)}</span>
                     <Badge tone={statusTone(p.status)}>{p.status}</Badge>
                   </li>
                 ))}

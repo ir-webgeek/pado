@@ -24,6 +24,7 @@ interface Settings {
   };
   agent: { enabled: boolean; tone: string; rules: string; neverOfferDiscount: boolean; knowledge: string; consultOnWeb: boolean };
   cardToCard: { cardNumber: string; holder: string; bank: string };
+  invoice: { address: string; phone: string; postalCode: string; footer: string };
   pricing: { usdEnabled: boolean; usdRate: number; markupPercent: number; roundTo: number; rateUpdatedAt: string | null; autoFetch: boolean };
 }
 interface ShopResp {
@@ -64,6 +65,7 @@ function SettingsForm({ tab, data, onSaved }: { tab: Tab; data: ShopResp; onSave
   const { shop } = useShop();
   const s = data.shop.settings;
   const [general, setGeneral] = useState({ name: data.shop.name, kind: data.shop.kind, brandColor: data.shop.brandColor, timezone: data.shop.timezone });
+  const [invoice, setInvoice] = useState(s.invoice);
   const [agent, setAgent] = useState(s.agent);
   const [booking, setBooking] = useState(s.booking);
   const [loyalty, setLoyalty] = useState(s.loyalty);
@@ -94,7 +96,7 @@ function SettingsForm({ tab, data, onSaved }: { tab: Tab; data: ShopResp; onSave
       }
       const body =
         tab === "general"
-          ? general
+          ? { ...general, invoice }
           : tab === "agent"
             ? { agent }
             : tab === "booking"
@@ -138,6 +140,21 @@ function SettingsForm({ tab, data, onSaved }: { tab: Tab; data: ShopResp; onSave
               <Input dir="ltr" value={general.timezone} onChange={(e) => setGeneral({ ...general, timezone: e.target.value })} />
             </Field>
           </div>
+          <p className="pt-2 text-sm font-semibold strong">{t("s.invoice")}</p>
+          <Field label={t("s.invoiceAddress")}>
+            <Input value={invoice.address} maxLength={300} onChange={(e) => setInvoice({ ...invoice, address: e.target.value })} />
+          </Field>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label={t("auth.phone")}>
+              <Input dir="ltr" value={invoice.phone} maxLength={40} onChange={(e) => setInvoice({ ...invoice, phone: e.target.value })} />
+            </Field>
+            <Field label={t("co.postal")}>
+              <Input dir="ltr" inputMode="numeric" value={invoice.postalCode} maxLength={20} onChange={(e) => setInvoice({ ...invoice, postalCode: latinDigits(e.target.value) })} />
+            </Field>
+          </div>
+          <Field label={t("s.invoiceFooter")}>
+            <Input value={invoice.footer} maxLength={300} onChange={(e) => setInvoice({ ...invoice, footer: e.target.value })} />
+          </Field>
         </>
       )}
       {tab === "agent" && (
