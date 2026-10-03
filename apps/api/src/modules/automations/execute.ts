@@ -3,6 +3,7 @@ import { automationEvents, automationRules, conversations, messages, type AutoMe
 import { env } from "../../config";
 import { hmacSha256Hex } from "../../lib/crypto";
 import { sendAttachment, sendButtons, sendText, type IgAccount } from "../instagram/client";
+import { tagLinks, tagUrl } from "../inbox/dm-ref";
 
 type Rule = typeof automationRules.$inferSelect;
 
@@ -17,8 +18,20 @@ export function verifyConversationToken(token: string | undefined): string | nul
   return hmacSha256Hex(env.COOKIE_SECRET, `conv:${id}`).slice(0, 24) === sig ? id : null;
 }
 
+const siteOrigin = () => new URL(env.PUBLIC_WEB_URL).origin;
+/** Own-site links in a DM get the dm UTM source and this conversation's signed ref. */
+export const dmTagText = (text: string, conversationId: string) => tagLinks(text, siteOrigin(), conversationToken(conversationId));
+export const dmTagUrl = (url: string, conversationId: string) => tagUrl(url, siteOrigin(), conversationToken(conversationId));
+
 export const formUrl = (formId: string, conversationId?: string) =>
   `${env.PUBLIC_WEB_URL}/f/${formId}${conversationId ? `?c=${conversationToken(conversationId)}` : ""}`;
+
+function tagMessage(m: AutoMessage, conversationId: string): AutoMessage {
+  if (m.kind === "text") return { ...m, text: dmTagText(m.text, conversationId) };
+  if (m.kind === "image" && m.caption) return { ...m, caption: dmTagText(m.caption, conversationId) };
+  if (m.kind === "buttons") return { ...m, text: dmTagText(m.text, conversationId), buttons: m.buttons.map((b) => ({ ...b, url: dmTagUrl(b.url, conversationId) })) };
+  return m;
+}
 
 /** Text shown in the inbox for an outbound automated message. */
 export function describe(m: AutoMessage, conversationId?: string): string {
@@ -44,7 +57,8 @@ export function describe(m: AutoMessage, conversationId?: string): string {
  */
 export async function sendRuleMessages(db: Database, account: IgAccount | null, conv: { id: string; shopId: string; externalUserId: string }, rule: Rule) {
   const sent: string[] = [];
-  for (const m of rule.messages) {
+  for (const raw of rule.messages) {
+    const m = tagMessage(raw, conv.id);
     if (account) {
       if (m.kind === "text") await sendText(account, conv.externalUserId, m.text);
       else if (m.kind === "image") {

@@ -17,9 +17,9 @@ import {
 import type { Ctx } from "../../lib/context";
 import { requireFeature, requireShop } from "../../lib/auth";
 import { audit } from "../../lib/audit";
-import { badRequest, notFound, paymentRequired } from "../../lib/errors";
+import { badRequest, conflict, notFound, paymentRequired } from "../../lib/errors";
 import { env } from "../../config";
-import { bookAppointment, bookWalkIn, calendar, getSlots, rescheduleAppointment, transitionAppointment } from "./service";
+import { bookAppointment, bookWalkIn, calendar, getSlots, refundAppointmentToWallet, rescheduleAppointment, transitionAppointment } from "./service";
 
 const params = z.object({ shopId: z.string().uuid() });
 const withId = params.extend({ id: z.string().uuid() });
@@ -185,8 +185,14 @@ export const appointmentRoutes =
 
     app.post(
       "/:shopId/appointments/:id/refund",
-      { preHandler: requireShop(ctx, "admin"), schema: { params: withId, body: z.object({ status: z.enum(["refunded", "kept"]) }) } },
+      { preHandler: requireShop(ctx, "admin"), schema: { params: withId, body: z.object({ status: z.enum(["refunded", "kept", "wallet"]) }) } },
       async (req) => {
+        if (req.body.status === "wallet") {
+          const a = await refundAppointmentToWallet(ctx.db, req.shop.id, req.params.id, actorOf(req.user.sub));
+          if (!a) throw conflict("not_refundable", "only a paid, cancelled booking without a settled refund can go to the wallet");
+          await ctx.queues.add("notify.wallet-refund", { appointmentId: a.id });
+          return { ok: true };
+        }
         const [row] = await ctx.db
           .update(appointments)
           .set({ refundStatus: req.body.status, ...(req.body.status === "refunded" ? { paymentStatus: "refunded" as const } : {}) })

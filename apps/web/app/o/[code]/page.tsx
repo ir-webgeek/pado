@@ -1,7 +1,7 @@
 "use client";
 
 import clsx from "clsx";
-import { CheckCircle2, Clock, CreditCard, Landmark, PackageCheck, Truck, Upload, XCircle } from "lucide-react";
+import { CheckCircle2, Clock, CreditCard, Landmark, PackageCheck, Truck, Upload, Wallet, XCircle } from "lucide-react";
 import { use, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { Suspense } from "react";
@@ -10,6 +10,7 @@ import { api, useApi } from "@/lib/api";
 import { dateTime, latinDigits, money, num } from "@/lib/format";
 import type { DictKey } from "@/lib/i18n";
 import { useI18n } from "@/lib/locale-client";
+import { PLATFORM_ACCENT, shopAccent } from "@/lib/brand";
 
 interface OrderResp {
   order: {
@@ -28,10 +29,10 @@ interface OrderResp {
     items: { id: string; title: string; variantLabel: string; quantity: number; total: number }[];
     timeline: { type: string; at: string }[];
   };
-  customer: { name: string | null; points: number } | null;
+  customer: { name: string | null; points: number; walletBalance: number } | null;
   shop: { name: string; slug: string; brandColor: string };
   shippingMethods: { id: string; name: string; price: number; freeOver: number | null }[];
-  paymentMethods: ("gateway" | "card_to_card")[];
+  paymentMethods: ("gateway" | "card_to_card" | "wallet")[];
   loyalty: { pointValue: number } | null;
   pendingCardPayment: { id: string; status: string; card: { cardNumber: string; holder: string; bank: string } } | null;
 }
@@ -56,8 +57,8 @@ function OrderLink({ code }: { code: string }) {
   const paidFlag = sp.get("paid");
   const { data, error, mutate } = useApi<OrderResp>(`/public/orders/${code}?t=${encodeURIComponent(token)}`, { refreshInterval: 20_000 });
 
-  if (error) return <Shell brand="#1b263b"><p className="py-20 text-center muted">{t("common.error")}</p></Shell>;
-  if (!data) return <Shell brand="#1b263b"><Spinner className="mx-auto my-20" /></Shell>;
+  if (error) return <Shell brand={PLATFORM_ACCENT}><p className="py-20 text-center muted">{t("common.error")}</p></Shell>;
+  if (!data) return <Shell brand={PLATFORM_ACCENT}><Spinner className="mx-auto my-20" /></Shell>;
   const o = data.order;
   const awaiting = o.status === "awaiting_payment" && o.paymentStatus !== "pending_review";
   const stepIdx = STEPS.indexOf(o.status === "ready_to_ship" ? "processing" : o.status === "completed" ? "delivered" : (o.status as (typeof STEPS)[number]));
@@ -131,7 +132,7 @@ function Checkout({ code, token, data, onDone }: { code: string; token: string; 
   const { t, locale } = useI18n();
   const [addr, setAddr] = useState({ fullName: data.customer?.name ?? "", phone: "", province: "", city: "", line: "", postalCode: "" });
   const [shipping, setShipping] = useState(data.shippingMethods[0]?.id ?? "");
-  const [method, setMethod] = useState<"gateway" | "card_to_card">("gateway");
+  const [method, setMethod] = useState<OrderResp["paymentMethods"][number]>("gateway");
   const [usePoints, setUsePoints] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
@@ -210,8 +211,8 @@ function Checkout({ code, token, data, onDone }: { code: string; token: string; 
         <div className="grid gap-2 sm:grid-cols-2">
           {data.paymentMethods.map((m) => (
             <button type="button" key={m} onClick={() => setMethod(m)} className={clsx("flex items-center gap-2 rounded-xl border px-3 py-2.5 text-sm", method === m ? "border-[var(--accent)] strong" : "border-[var(--border)] muted")}>
-              {m === "gateway" ? <CreditCard className="size-4" /> : <Landmark className="size-4" />}
-              {m === "gateway" ? t("co.gateway") : t("co.cardToCard")}
+              {m === "gateway" ? <CreditCard className="size-4" /> : m === "wallet" ? <Wallet className="size-4" /> : <Landmark className="size-4" />}
+              {m === "gateway" ? t("co.gateway") : m === "wallet" ? `${t("w.payWith")} · ${money(data.customer?.walletBalance ?? 0, locale)}` : t("co.cardToCard")}
             </button>
           ))}
         </div>
@@ -253,7 +254,7 @@ function CardToCard({ code, token, paymentId, amount, card, onDone }: { code: st
   return (
     <div className="card mt-5 space-y-4 p-5">
       <p className="text-sm muted">{t("co.transferTo")}</p>
-      <div className="rounded-2xl bg-gradient-to-br from-[#1b263b] to-[#415a77] p-5 text-white">
+      <div className="rounded-2xl bg-gradient-to-br from-[#1a1631] to-[#5b4fa8] p-5 text-white">
         <p className="text-xs opacity-70">{card.bank}</p>
         <p className="num mt-4 text-xl tracking-widest" dir="ltr">
           {card.cardNumber.replace(/(\d{4})(?=\d)/g, "$1 ")}
@@ -275,7 +276,7 @@ function CardToCard({ code, token, paymentId, amount, card, onDone }: { code: st
 
 function Shell({ brand, children }: { brand: string; children: React.ReactNode }) {
   return (
-    <div data-theme="day" className="min-h-dvh bg-[var(--bg)] px-4 py-8 text-[var(--text-body)]" style={{ "--accent": brand === "#d9d0b8" ? "#1b263b" : brand } as React.CSSProperties}>
+    <div data-theme="day" className="min-h-dvh bg-[var(--bg)] px-4 py-8 text-[var(--text-body)]" style={{ "--accent": shopAccent(brand) } as React.CSSProperties}>
       <div className="mx-auto max-w-xl">{children}</div>
     </div>
   );

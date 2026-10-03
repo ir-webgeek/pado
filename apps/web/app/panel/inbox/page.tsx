@@ -1,11 +1,11 @@
 "use client";
 
 import clsx from "clsx";
-import { Bot, FlaskConical, MessageCircle, RotateCcw, Send, User } from "lucide-react";
+import { Bot, FlaskConical, Link2, MessageCircle, RotateCcw, Send, User } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Avatar, Badge, Button, Card, Empty, ErrorNote, Input, PageHeader, Spinner, Tabs, statusTone } from "@/components/ui";
 import { api, useApi } from "@/lib/api";
-import { relative, time } from "@/lib/format";
+import { money, num, relative, time } from "@/lib/format";
 import type { DictKey } from "@/lib/i18n";
 import { useI18n } from "@/lib/locale-client";
 import { useShop } from "@/lib/shop";
@@ -21,6 +21,13 @@ interface Conversation {
   unread: number;
   lastMessageAt: string;
   lastText: string | null;
+}
+interface SiteActivity {
+  visits: number;
+  lastAt: string | null;
+  lastPath: string | null;
+  orders: { id: string; code: string; total: number; status: string; paymentStatus: string }[];
+  bookings: { id: string; code: string; status: string; startsAt: string }[];
 }
 interface Message {
   id: string;
@@ -116,9 +123,9 @@ function Bubble({ m }: { m: Pick<Message, "direction" | "sender" | "text" | "cre
 }
 
 function Thread({ id, onBack, onChange }: { id: string; onBack: () => void; onChange: () => void }) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const { shop } = useShop();
-  const { data, mutate } = useApi<{ conversation: Conversation; messages: Message[] }>(`/shops/${shop.id}/conversations/${id}/messages`, { refreshInterval: 5000 });
+  const { data, mutate } = useApi<{ conversation: Conversation; messages: Message[]; site: SiteActivity }>(`/shops/${shop.id}/conversations/${id}/messages`, { refreshInterval: 5000 });
   const [text, setText] = useState("");
   const [error, setError] = useState<unknown>(null);
   const end = useRef<HTMLDivElement>(null);
@@ -159,6 +166,34 @@ function Thread({ id, onBack, onChange }: { id: string; onBack: () => void; onCh
           </button>
         </div>
       </div>
+      {(data.site.visits > 0 || data.site.orders.length > 0 || data.site.bookings.length > 0) && (
+        <div className="flex flex-wrap items-center gap-2 border-b border-[var(--border)] bg-[var(--surface-sunken)] px-4 py-2 text-xs">
+          <Link2 className="size-3.5 text-[var(--accent)]" />
+          <span className="strong">{t("in.site")}</span>
+          <span className="muted">
+            {num(data.site.visits, locale)} {t("in.visits")}
+            {data.site.lastAt && ` · ${relative(data.site.lastAt, locale)}`}
+            {data.site.lastPath && (
+              <>
+                {" · "}
+                <bdi dir="ltr">{data.site.lastPath}</bdi>
+              </>
+            )}
+          </span>
+          {data.site.orders.map((o) => (
+            <a key={o.id} href={`/panel/orders/${o.id}`}>
+              <Badge tone={statusTone(o.paymentStatus)}>
+                {o.code} · {money(o.total, locale, false)}
+              </Badge>
+            </a>
+          ))}
+          {data.site.bookings.map((b) => (
+            <Badge key={b.id} tone={statusTone(b.status)}>
+              {b.code}
+            </Badge>
+          ))}
+        </div>
+      )}
       <div className="scroll-thin flex flex-1 flex-col gap-2 overflow-y-auto p-4">
         {data.messages.map((m) => (
           <Bubble key={m.id} m={m} />

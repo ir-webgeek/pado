@@ -13,12 +13,16 @@ import {
   notifyOrderPaid,
   notifyOrderShipped,
   notifyReceiptUploaded,
+  notifyHandoff,
+  notifyWalletRefund,
   sendAppointmentReminder,
   sendCampaign,
 } from "./modules/notifications/notify";
 import { expireOrderIfDue } from "./modules/orders/service";
 import { refreshUsdRateFromSource } from "./modules/pricing/service";
 import { analyzeMedia } from "./modules/instagram/importer";
+import { refreshInstagramTokens } from "./modules/instagram/token-refresh";
+import { runWooImport } from "./modules/woocommerce/import";
 
 const { db, client } = createDb(env.DATABASE_URL, { max: 10 });
 const connection = createRedis({ forWorker: true });
@@ -54,17 +58,21 @@ const handlers: Handlers = {
   "appointment.hold-expire": ({ appointmentId }) => expireHoldIfDue(db, appointmentId),
   "appointment.reminder": ({ appointmentId, offsetMin }) => sendAppointmentReminder(db, appointmentId, offsetMin),
   "customers.recompute-segments": ({ shopId }) => recomputeSegments(shopId),
-  "notify.order-paid": ({ orderId }) => notifyOrderPaid(db, orderId),
+  "notify.order-paid": ({ orderId }) => notifyOrderPaid(db, orderId, redis),
   "notify.order-shipped": ({ orderId }) => notifyOrderShipped(db, orderId),
   "notify.receipt-uploaded": ({ paymentId }) => notifyReceiptUploaded(db, paymentId),
-  "notify.appointment-booked": ({ appointmentId }) => notifyAppointmentBooked(db, appointmentId),
+  "notify.appointment-booked": ({ appointmentId }) => notifyAppointmentBooked(db, appointmentId, redis),
   "notify.appointment-cancelled": ({ appointmentId }) => notifyAppointmentCancelled(db, appointmentId),
+  "notify.wallet-refund": ({ appointmentId }) => notifyWalletRefund(db, appointmentId),
+  "notify.handoff": ({ conversationId, reason }) => notifyHandoff(db, redis, conversationId, reason),
   "campaign.send": ({ campaignId }) => sendCampaign(db, campaignId),
   "ig.message": (d) =>
     handleInbound(db, queues, redis, { shopId: d.shopId, channel: "instagram", externalUserId: d.igsid, text: d.text, externalId: d.mid, attachments: d.attachments, storyReplyId: d.storyReplyId }),
   "ig.comment": (d) => handleComment(db, redis, d),
   "pricing.refresh-usd": () => refreshUsdRateFromSource(db),
   "instagram.analyze": ({ shopId, mediaRowIds }) => analyzeMedia(db, shopId, mediaRowIds),
+  "instagram.refresh-tokens": () => refreshInstagramTokens(db),
+  "woocommerce.import": ({ importId }) => runWooImport(db, importId),
 };
 
 const process = (job: Job) => {
@@ -89,6 +97,9 @@ await queues.queues.scheduled.upsertJobScheduler(
   { pattern: "30 3 * * *", tz: "Asia/Tehran" },
   { name: "customers.recompute-segments", data: {} },
 );
+
+// long-lived Instagram tokens expire after 60 days unless refreshed
+await queues.queues.scheduled.upsertJobScheduler("ig-token-refresh", { pattern: "15 4 * * *", tz: "Asia/Tehran" }, { name: "instagram.refresh-tokens", data: {} });
 
 if (env.USD_RATE_URL) {
   await queues.queues.scheduled.upsertJobScheduler("usd-rate", { every: 60 * 60_000 }, { name: "pricing.refresh-usd", data: {} });

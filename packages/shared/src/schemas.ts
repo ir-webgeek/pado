@@ -17,6 +17,9 @@ export const paginationSchema = z.object({
 export const requestOtpSchema = z.object({ phone: phoneSchema });
 export const verifyOtpSchema = z.object({ phone: phoneSchema, code: z.string().length(5) });
 
+/** uploaded media (absolute http(s) URL) */
+const mediaUrl = z.string().url().max(500).refine((u) => /^https?:\/\//.test(u), "http(s) url required");
+
 export const createShopSchema = z.object({
   name: z.string().min(2).max(80),
   slug: slugSchema,
@@ -30,6 +33,7 @@ export const updateShopSettingsSchema = z.object({
   brandColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
   theme: z.string().max(40).optional(),
   timezone: z.string().max(60).optional(),
+  logo: mediaUrl.nullable().optional(),
   loyalty: z
     .object({ enabled: z.boolean(), tomanPerPoint: z.number().int().min(1000), pointValue: z.number().int().min(0), expiryDays: z.number().int().min(0) })
     .partial()
@@ -44,6 +48,8 @@ export const updateShopSettingsSchema = z.object({
       cancelWindowMin: z.number().int().min(0),
       autoConfirm: z.boolean(),
       reminderOffsetsMin: z.array(z.number().int().min(5)).max(4),
+      customerReschedule: z.boolean(),
+      refundToWallet: z.boolean(),
     })
     .partial()
     .optional(),
@@ -60,6 +66,8 @@ export const updateShopSettingsSchema = z.object({
     .partial()
     .optional(),
   cardToCard: z.object({ cardNumber: z.string().max(19), holder: z.string().max(80), bank: z.string().max(40) }).partial().optional(),
+  alerts: z.object({ phone: z.string().max(20), onHandoff: z.boolean(), onOrder: z.boolean(), onBooking: z.boolean() }).partial().optional(),
+  invoice: z.object({ address: z.string().max(300), phone: z.string().max(40), postalCode: z.string().max(20), footer: z.string().max(300) }).partial().optional(),
   pricing: z
     .object({ usdEnabled: z.boolean(), markupPercent: z.number().min(0).max(500), roundTo: z.number().int().min(1).max(1_000_000), autoFetch: z.boolean() })
     .partial()
@@ -104,6 +112,25 @@ export const stockAdjustSchema = z.object({
   delta: z.number().int(),
   reason: z.enum(["purchase", "correction", "damage", "return", "count"]).default("correction"),
   note: z.string().max(200).optional(),
+});
+
+export const stockReceiptSchema = z.object({
+  supplier: z.string().max(120).default(""),
+  note: z.string().max(500).optional(),
+  receivedAt: z.coerce.date().optional(),
+  items: z
+    .array(z.object({ variantId: z.string().uuid(), quantity: z.number().int().min(1).max(1_000_000), unitCost: z.number().int().min(0) }))
+    .min(1)
+    .max(200)
+    .refine((items) => new Set(items.map((i) => i.variantId)).size === items.length, "each variant once per receipt"),
+});
+
+export const EXPENSE_CATEGORIES = ["rent", "salary", "materials", "marketing", "utilities", "shipping", "equipment", "tax", "other"] as const;
+export const expenseInputSchema = z.object({
+  category: z.enum(EXPENSE_CATEGORIES),
+  amount: z.number().int().min(1).max(100_000_000_000),
+  spentAt: z.coerce.date(),
+  note: z.string().max(300).optional(),
 });
 
 // ---------- orders ----------
@@ -170,7 +197,10 @@ export const serviceInputSchema = z.object({
   onlineBookable: z.boolean().default(true),
   requiresApproval: z.boolean().default(false),
   color: z.string().regex(/^#[0-9a-fA-F]{6}$/).default("#aebbd0"),
-  image: z.string().optional(),
+  image: mediaUrl.nullable().optional(),
+  banner: mediaUrl.nullable().optional(),
+  gallery: z.array(mediaUrl).max(12).optional(),
+  beforeAfter: z.array(z.object({ before: mediaUrl, after: mediaUrl, caption: z.string().max(140).optional() })).max(12).optional(),
   active: z.boolean().default(true),
   staffIds: z.array(z.string().uuid()).default([]),
 });
@@ -190,7 +220,7 @@ export const staffInputSchema = z.object({
   name: z.string().min(1).max(80),
   title: z.string().max(80).default(""),
   phone: z.string().max(20).optional(),
-  avatar: z.string().optional(),
+  avatar: mediaUrl.nullable().optional(),
   color: z.string().regex(/^#[0-9a-fA-F]{6}$/).default("#d9d0b8"),
   memberId: z.string().uuid().nullable().optional(),
   active: z.boolean().default(true),
@@ -305,3 +335,4 @@ export type ServiceInput = z.infer<typeof serviceInputSchema>;
 export type StaffInput = z.infer<typeof staffInputSchema>;
 export type CreateAppointmentInput = z.infer<typeof createAppointmentSchema>;
 export type ShopSettingsInput = z.infer<typeof updateShopSettingsSchema>;
+export type StockReceiptInput = z.infer<typeof stockReceiptSchema>;

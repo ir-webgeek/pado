@@ -68,7 +68,7 @@ export function PricingCards() {
           const prev = idx === 0 ? [] : PLANS[PLAN_IDS[idx - 1]!].features;
           const extra = p.features.filter((f) => !prev.includes(f) && featureLabels[f]);
           return (
-            <div key={id} className={clsx("card relative flex flex-col p-5", p.recommended && "border-gold/50 shadow-[0_0_0_1px_rgb(217_208_184/.3),0_24px_60px_-24px_rgb(217_208_184/.35)]")}>
+            <div key={id} className={clsx("card relative flex flex-col p-5", p.recommended && "border-gold/50 shadow-[0_0_0_1px_rgb(61_219_196/.3),0_24px_60px_-24px_rgb(61_219_196/.35)]")}>
               {p.recommended && <span className="absolute -top-3 start-5 rounded-full bg-[var(--accent)] px-3 py-0.5 text-xs font-medium text-[var(--accent-ink)]">{t("pricing.recommended")}</span>}
               <h3 className="text-lg font-bold strong">{names[id][locale]}</h3>
               <div className="mt-3 min-h-16">

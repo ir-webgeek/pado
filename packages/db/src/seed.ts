@@ -231,6 +231,7 @@ async function main() {
       channel: "instagram" as const,
       price: service.price,
       confirmedAt: status === "pending" ? null : new Date(),
+      completedAt: status === "completed" ? endsAt : null,
     };
   };
   await db.insert(s.appointments).values([

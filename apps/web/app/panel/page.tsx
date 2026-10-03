@@ -9,6 +9,7 @@ import { money, num, time, weekdayShort } from "@/lib/format";
 import { useI18n } from "@/lib/locale-client";
 import { useShop } from "@/lib/shop";
 import type { DictKey } from "@/lib/i18n";
+import { SetupChecklist } from "@/components/setup-checklist";
 
 interface Dashboard {
   revenue: { total: number; orders: number; appointments: number; changePct: number | null };
@@ -46,8 +47,9 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-4">
+      <SetupChecklist />
       <div className="glass relative overflow-hidden rounded-[1.25rem] p-5 sm:p-6">
-        <div className="absolute inset-0 bg-[radial-gradient(500px_200px_at_100%_0%,rgb(217_208_184/.14),transparent)]" />
+        <div className="absolute inset-0 bg-[radial-gradient(500px_200px_at_100%_0%,rgb(61_219_196/.14),transparent)]" />
         <p className="relative text-sm muted">
           {t("d.hello")}، {shop.name} 🌙
         </p>

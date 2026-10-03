@@ -1,28 +1,32 @@
 @import "tailwindcss";
 
 /*
- * Design tokens. "Night" (default) is inspired by a calm night sky: deep ink surfaces, glass panels,
- * a warm sand-gold accent. "Day" keeps the same hierarchy on paper surfaces.
+ * Design tokens. "Night" is a deep plum night sky with glass panels and a Persian-turquoise accent;
+ * "Day" keeps the same hierarchy on paper surfaces with a deep turquoise accent. The "gold" names are
+ * the accent role (kept so utility classes stay stable); every text pair here clears WCAG AA.
  */
 @theme {
   --font-sans: var(--font-vazirmatn), ui-sans-serif, system-ui, sans-serif;
-  --color-ink-950: #080d17;
-  --color-ink-900: #0d1424;
-  --color-ink-850: #11192a;
-  --color-ink-800: #18233a;
-  --color-ink-700: #243349;
-  --color-slate-brand: #415a77;
-  --color-sky-brand: #aebbd0;
-  --color-gold: #d9d0b8;
-  --color-gold-deep: #c4b894;
+  --color-ink-950: #07060f;
+  --color-ink-900: #0d0b1a;
+  --color-ink-850: #131027;
+  --color-ink-800: #1a1631;
+  --color-ink-700: #262043;
+  --color-slate-brand: #5b4fa8;
+  --color-sky-brand: #b3a8f0;
+  --color-gold: #3ddbc4;
+  --color-gold-deep: #22b8a3;
   --color-success: #2dbf80;
   --color-warning: #ef9736;
   --color-danger: #f86d77;
   --color-info: #52b4fd;
   --radius-panel: 1.25rem;
+  --ease-out-quint: cubic-bezier(0.22, 1, 0.36, 1);
   --animate-twinkle: twinkle 4s ease-in-out infinite;
-  --animate-rise: rise 0.7s cubic-bezier(0.33, 0.62, 0.05, 1) both;
+  --animate-rise: rise 0.7s cubic-bezier(0.22, 1, 0.36, 1) both;
   --animate-typing: typing 1.2s steps(3) infinite;
+  --animate-halo: halo 3.2s ease-in-out infinite;
+  --animate-drift: drift 18s ease-in-out infinite alternate;
   @keyframes twinkle {
     0%, 100% { opacity: 0.25; }
     50% { opacity: 1; }
@@ -31,43 +35,60 @@
     from { opacity: 0; transform: translateY(14px); }
     to { opacity: 1; transform: none; }
   }
+  @keyframes halo {
+    0%, 100% { opacity: 0.45; transform: scale(1); }
+    50% { opacity: 1; transform: scale(1.07); }
+  }
+  @keyframes drift {
+    from { transform: translateX(-6%); }
+    to { transform: translateX(6%); }
+  }
 }
 
 :root {
-  --bg: #0b1120;
-  --bg-elev: #11192a;
-  --surface: rgb(24 35 58 / 0.72);
-  --surface-strong: #18233a;
-  --surface-sunken: rgb(174 187 208 / 0.06);
+  --bg: #0b0916;
+  --bg-elev: #131027;
+  --surface: rgb(26 22 49 / 0.72);
+  --surface-strong: #1a1631;
+  --surface-sunken: rgb(179 168 240 / 0.06);
   --border: rgb(255 255 255 / 0.09);
   --border-strong: rgb(255 255 255 / 0.16);
-  --text: #f3f5f8;
-  --text-body: #d7deea;
-  --text-muted: #9aa7bc;
-  --accent: #d9d0b8;
-  --accent-ink: #11192a;
-  --accent-soft: rgb(217 208 184 / 0.14);
-  --ring: #aebbd0;
+  --text: #f4f3fa;
+  --text-body: #dcd9ee;
+  --text-muted: #a29dbd;
+  --accent: #3ddbc4;
+  --accent-ink: #062420;
+  --accent-soft: rgb(61 219 196 / 0.14);
+  --ring: #b3a8f0;
   --shadow: 0 1px 2px #0000004d, 0 12px 32px -8px #00000080;
+  /* chart series, validated (CVD + contrast) against the card surface of each theme */
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --chart-grid: rgb(255 255 255 / 0.07);
+  --chart-axis: rgb(255 255 255 / 0.16);
   color-scheme: dark;
 }
 
 [data-theme="day"] {
-  --bg: #f6f7f9;
+  --bg: #f6f5fb;
   --bg-elev: #ffffff;
   --surface: rgb(255 255 255 / 0.82);
   --surface-strong: #ffffff;
-  --surface-sunken: rgb(27 38 59 / 0.04);
-  --border: rgb(27 38 59 / 0.1);
-  --border-strong: rgb(27 38 59 / 0.18);
-  --text: #11192a;
-  --text-body: #243349;
-  --text-muted: #5c6b84;
-  --accent: #1b263b;
-  --accent-ink: #f6f7f9;
-  --accent-soft: rgb(27 38 59 / 0.08);
-  --ring: #415a77;
-  --shadow: 0 1px 2px #1b263b14, 0 12px 32px -12px #1b263b33;
+  --surface-sunken: rgb(26 22 49 / 0.04);
+  --border: rgb(26 22 49 / 0.1);
+  --border-strong: rgb(26 22 49 / 0.18);
+  --text: #15122a;
+  --text-body: #2b2648;
+  --text-muted: #625d80;
+  --accent: #0b7a6d;
+  --accent-ink: #ffffff;
+  --accent-soft: rgb(11 122 109 / 0.09);
+  --ring: #5b4fa8;
+  --shadow: 0 1px 2px #1a163114, 0 12px 32px -12px #1a163133;
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --chart-grid: #e1e0d9;
+  --chart-axis: #c3c2b7;
   color-scheme: light;
 }
 
@@ -87,6 +108,63 @@ body {
 :focus-visible {
   outline: 2px solid var(--ring);
   outline-offset: 2px;
+}
+
+/* scroll reveal: content is only hidden once the inline script has marked JS as running */
+.js .reveal:not(.is-in) {
+  opacity: 0;
+  transform: translate3d(0, 36px, 0);
+}
+.reveal {
+  transition:
+    opacity 0.9s var(--ease-out-quint),
+    transform 0.9s var(--ease-out-quint);
+  transition-delay: var(--reveal-delay, 0ms);
+}
+.hero-gradient {
+  background-image: linear-gradient(to left, #3ddbc4, #e6fffb, #b3a8f0);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+[data-theme="day"] .hero-gradient {
+  background-image: linear-gradient(to left, #0b7a6d, #3a2f8a, #5b4fa8);
+}
+@media (prefers-reduced-motion: reduce) {
+  .js .reveal:not(.is-in) {
+    opacity: 1;
+    transform: none;
+  }
+  *,
+  ::before,
+  ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* order invoice / label: only the portal is printed, always black on white */
+@media screen {
+  .print-root {
+    display: none;
+  }
+}
+@media print {
+  body > *:not(.print-root) {
+    display: none !important;
+  }
+  html,
+  body {
+    background: #fff !important;
+  }
+  .print-root {
+    color: #000;
+    background: #fff;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
 }
 
 @layer components {
@@ -113,14 +191,15 @@ body {
   }
   .night-sky {
     background:
-      radial-gradient(1200px 600px at 50% -10%, rgb(65 90 119 / 0.45), transparent 70%),
-      radial-gradient(800px 400px at 85% 10%, rgb(217 208 184 / 0.08), transparent 70%),
-      linear-gradient(180deg, #0b1120 0%, #0d1628 60%, #0b1120 100%);
+      radial-gradient(1200px 600px at 50% -10%, rgb(91 79 168 / 0.45), transparent 70%),
+      radial-gradient(800px 400px at 85% 10%, rgb(61 219 196 / 0.09), transparent 70%),
+      linear-gradient(180deg, #0b0916 0%, #120f26 60%, #0b0916 100%);
   }
   [data-theme="day"] .night-sky {
     background:
-      radial-gradient(1200px 600px at 50% -10%, rgb(174 187 208 / 0.55), transparent 70%),
-      linear-gradient(180deg, #eef1f6 0%, #f6f7f9 100%);
+      radial-gradient(1200px 600px at 50% -10%, rgb(179 168 240 / 0.45), transparent 70%),
+      radial-gradient(800px 400px at 85% 10%, rgb(61 219 196 / 0.12), transparent 70%),
+      linear-gradient(180deg, #efedf9 0%, #f6f5fb 100%);
   }
   .input {
     width: 100%;

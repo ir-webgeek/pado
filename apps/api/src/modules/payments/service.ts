@@ -6,7 +6,7 @@ import { badRequest, conflict, notFound } from "../../lib/errors";
 import type { Queues } from "../../lib/queues";
 import { markAppointmentPaid } from "../appointments/service";
 import { markOrderPaid } from "../orders/service";
-import { walletMove } from "../wallet/service";
+import { customerWalletMove, walletMove } from "../wallet/service";
 import { activeProvider, providerByName } from "./providers";
 
 export type PaymentStart =
@@ -59,13 +59,61 @@ async function start(
   return { kind: "redirect", url: redirectUrl, paymentId: p!.id };
 }
 
-export async function startOrderPayment(db: Database, orderId: string): Promise<PaymentStart> {
+/**
+ * Pays an order or booking from the customer's store credit at that shop. The target row is locked
+ * first, so a repeated request sees it already paid and never debits twice. No platform fee: it was
+ * taken when the money first came in.
+ */
+async function payFromWallet(
+  db: Database,
+  queues: Queues,
+  input: { shopId: string; customerId: string; amount: number } & ({ purpose: "order"; orderId: string } | { purpose: "appointment"; appointmentId: string }),
+): Promise<PaymentStart> {
+  const paymentId = await db.transaction(async (tx) => {
+    if (input.purpose === "order") {
+      const [o] = await tx.select({ paymentStatus: orders.paymentStatus }).from(orders).where(eq(orders.id, input.orderId)).for("update");
+      if (o?.paymentStatus === "paid") return null;
+    } else {
+      const [a] = await tx.select({ paymentStatus: appointments.paymentStatus }).from(appointments).where(eq(appointments.id, input.appointmentId)).for("update");
+      if (a?.paymentStatus === "paid") return null;
+    }
+    const refId = input.purpose === "order" ? input.orderId : input.appointmentId;
+    await customerWalletMove(tx, input.shopId, input.customerId, -input.amount, "payment", { type: input.purpose, id: refId });
+    const [p] = await tx
+      .insert(payments)
+      .values({
+        shopId: input.shopId,
+        purpose: input.purpose,
+        orderId: input.purpose === "order" ? input.orderId : null,
+        appointmentId: input.purpose === "appointment" ? input.appointmentId : null,
+        provider: "wallet",
+        method: "wallet",
+        amount: input.amount,
+        status: "paid",
+        paidAt: new Date(),
+      })
+      .returning({ id: payments.id });
+    if (input.purpose === "order") await markOrderPaid(tx, input.orderId, { type: "customer" }, { method: "wallet", refId: p!.id });
+    else await markAppointmentPaid(tx, input.appointmentId, input.amount);
+    return p!.id;
+  });
+  if (!paymentId) return { kind: "paid" };
+  if (input.purpose === "order") await queues.add("notify.order-paid", { orderId: input.orderId });
+  else await queues.add("notify.appointment-booked", { appointmentId: input.appointmentId });
+  return { kind: "paid", paymentId };
+}
+
+export async function startOrderPayment(db: Database, queues: Queues, orderId: string): Promise<PaymentStart> {
   const o = await db.query.orders.findFirst({ where: eq(orders.id, orderId) });
   if (!o) throw notFound("order");
   if (o.paymentStatus === "paid") return { kind: "paid" };
   if (o.total === 0) {
     await db.transaction((tx) => markOrderPaid(tx, o.id, { type: "customer" }, { method: "wallet" }));
     return { kind: "paid" };
+  }
+  if (o.paymentMethod === "wallet") {
+    if (!o.customerId) throw badRequest("customer_required");
+    return payFromWallet(db, queues, { purpose: "order", orderId: o.id, shopId: o.shopId, customerId: o.customerId, amount: o.total });
   }
   return start(db, {
     shopId: o.shopId,
@@ -78,12 +126,13 @@ export async function startOrderPayment(db: Database, orderId: string): Promise<
   });
 }
 
-export async function startAppointmentPayment(db: Database, appointmentId: string, method: PaymentMethod): Promise<PaymentStart> {
+export async function startAppointmentPayment(db: Database, queues: Queues, appointmentId: string, method: PaymentMethod): Promise<PaymentStart> {
   const a = await db.query.appointments.findFirst({ where: eq(appointments.id, appointmentId) });
   if (!a) throw notFound("appointment");
   if (a.paymentStatus === "paid") return { kind: "paid" };
   if (a.status === "cancelled") throw conflict("appointment_cancelled", "this booking was cancelled");
   const amount = a.depositAmount > 0 ? a.depositAmount : a.price - a.discountTotal;
+  if (method === "wallet") return payFromWallet(db, queues, { purpose: "appointment", appointmentId: a.id, shopId: a.shopId, customerId: a.customerId, amount });
   return start(db, { shopId: a.shopId, purpose: "appointment", appointmentId: a.id, amount, method, description: `Booking ${a.code}` });
 }
 

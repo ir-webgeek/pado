@@ -3,8 +3,10 @@
 import { Check, Wallet } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Button, Card, ErrorNote, Field, Input, PageHeader, Select, Spinner, Tabs, Textarea, Toggle } from "@/components/ui";
+import { UploadButton } from "@/components/upload";
 import { api, useApi } from "@/lib/api";
-import { dateTime, latinDigits, money } from "@/lib/format";
+import { date, dateTime, latinDigits, money } from "@/lib/format";
+import type { DictKey } from "@/lib/i18n";
 import { useI18n } from "@/lib/locale-client";
 import { useShop } from "@/lib/shop";
 
@@ -12,22 +14,39 @@ interface Settings {
   loyalty: { enabled: boolean; tomanPerPoint: number; pointValue: number; expiryDays: number };
   vipRule: { minOrders: number; minSpend: number; withinDays: number };
   atRiskDays: number;
-  booking: { slotStepMin: number; minNoticeMin: number; maxAdvanceDays: number; cancelWindowMin: number; autoConfirm: boolean; reminderOffsetsMin: number[] };
+  booking: {
+    slotStepMin: number;
+    minNoticeMin: number;
+    maxAdvanceDays: number;
+    cancelWindowMin: number;
+    autoConfirm: boolean;
+    reminderOffsetsMin: number[];
+    customerReschedule: boolean;
+    refundToWallet: boolean;
+  };
   agent: { enabled: boolean; tone: string; rules: string; neverOfferDiscount: boolean; knowledge: string; consultOnWeb: boolean };
   cardToCard: { cardNumber: string; holder: string; bank: string };
+  invoice: { address: string; phone: string; postalCode: string; footer: string };
+  alerts: { phone: string; onHandoff: boolean; onOrder: boolean; onBooking: boolean };
   pricing: { usdEnabled: boolean; usdRate: number; markupPercent: number; roundTo: number; rateUpdatedAt: string | null; autoFetch: boolean };
 }
 interface ShopResp {
-  shop: { id: string; name: string; kind: string; brandColor: string; timezone: string; telegramChatId: string | null; settlementIban: string | null; igUsername: string | null; instagramConnected: boolean; walletBalance: number; settings: Settings };
+  shop: { id: string; name: string; kind: string; brandColor: string; logo: string | null; timezone: string; telegramChatId: string | null; settlementIban: string | null; igUsername: string | null; instagramConnected: boolean; instagramOAuth: boolean; igTokenExpiresAt: string | null; walletBalance: number; settings: Settings };
 }
 
-type Tab = "general" | "agent" | "booking" | "loyalty" | "payments" | "pricing" | "integrations" | "wallet";
+const TABS = ["general", "agent", "booking", "loyalty", "payments", "pricing", "integrations", "wallet"] as const;
+type Tab = (typeof TABS)[number];
 
 export default function SettingsPage() {
   const { t } = useI18n();
   const { shop } = useShop();
   const { data, mutate } = useApi<ShopResp>(`/shops/${shop.id}`);
   const [tab, setTab] = useState<Tab>("general");
+  // deep links such as the setup checklist's ?tab=payments
+  useEffect(() => {
+    const wanted = new URLSearchParams(window.location.search).get("tab");
+    if (wanted && TABS.includes(wanted as Tab)) setTab(wanted as Tab);
+  }, []);
   if (!data) return <Spinner />;
   const tabs: { value: Tab; label: string }[] = [
     { value: "general", label: t("s.general") },
@@ -54,7 +73,9 @@ function SettingsForm({ tab, data, onSaved }: { tab: Tab; data: ShopResp; onSave
   const { t } = useI18n();
   const { shop } = useShop();
   const s = data.shop.settings;
-  const [general, setGeneral] = useState({ name: data.shop.name, kind: data.shop.kind, brandColor: data.shop.brandColor, timezone: data.shop.timezone });
+  const [general, setGeneral] = useState({ name: data.shop.name, kind: data.shop.kind, brandColor: data.shop.brandColor, timezone: data.shop.timezone, logo: data.shop.logo });
+  const [invoice, setInvoice] = useState(s.invoice);
+  const [alerts, setAlerts] = useState(s.alerts);
   const [agent, setAgent] = useState(s.agent);
   const [booking, setBooking] = useState(s.booking);
   const [loyalty, setLoyalty] = useState(s.loyalty);
@@ -85,7 +106,7 @@ function SettingsForm({ tab, data, onSaved }: { tab: Tab; data: ShopResp; onSave
       }
       const body =
         tab === "general"
-          ? general
+          ? { ...general, invoice }
           : tab === "agent"
             ? { agent }
             : tab === "booking"
@@ -96,7 +117,7 @@ function SettingsForm({ tab, data, onSaved }: { tab: Tab; data: ShopResp; onSave
                   ? { cardToCard: card, ...(iban ? { settlementIban: iban.replace(/\s/g, "").toUpperCase() } : {}) }
                   : tab === "pricing"
                     ? { pricing: { usdEnabled: pricing.usdEnabled, markupPercent: pricing.markupPercent, roundTo: pricing.roundTo, autoFetch: pricing.autoFetch } }
-                    : { telegramChatId: telegram };
+                    : { telegramChatId: telegram, alerts: { ...alerts, phone: latinDigits(alerts.phone) } };
       await api(`/shops/${shop.id}/settings`, { method: "PATCH", json: body });
       setSaved(true);
       onSaved();
@@ -114,6 +135,16 @@ function SettingsForm({ tab, data, onSaved }: { tab: Tab; data: ShopResp; onSave
           <Field label={t("onb.name")}>
             <Input value={general.name} onChange={(e) => setGeneral({ ...general, name: e.target.value })} />
           </Field>
+          <div className="flex items-center gap-3">
+            <span className="label !mb-0">{t("onb.logo")}</span>
+            {general.logo && <img src={general.logo} alt="" className="size-12 rounded-xl object-cover" />}
+            <UploadButton label={t("sv.upload")} onUploaded={(logo) => setGeneral({ ...general, logo })} />
+            {general.logo && (
+              <Button size="sm" variant="ghost" onClick={() => setGeneral({ ...general, logo: null })}>
+                {t("sv.remove")}
+              </Button>
+            )}
+          </div>
           <Field label={t("onb.kind")}>
             <Select value={general.kind} onChange={(e) => setGeneral({ ...general, kind: e.target.value })}>
               {(["retail", "services", "hybrid"] as const).map((k) => (
@@ -129,6 +160,21 @@ function SettingsForm({ tab, data, onSaved }: { tab: Tab; data: ShopResp; onSave
               <Input dir="ltr" value={general.timezone} onChange={(e) => setGeneral({ ...general, timezone: e.target.value })} />
             </Field>
           </div>
+          <p className="pt-2 text-sm font-semibold strong">{t("s.invoice")}</p>
+          <Field label={t("s.invoiceAddress")}>
+            <Input value={invoice.address} maxLength={300} onChange={(e) => setInvoice({ ...invoice, address: e.target.value })} />
+          </Field>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label={t("auth.phone")}>
+              <Input dir="ltr" value={invoice.phone} maxLength={40} onChange={(e) => setInvoice({ ...invoice, phone: e.target.value })} />
+            </Field>
+            <Field label={t("co.postal")}>
+              <Input dir="ltr" inputMode="numeric" value={invoice.postalCode} maxLength={20} onChange={(e) => setInvoice({ ...invoice, postalCode: latinDigits(e.target.value) })} />
+            </Field>
+          </div>
+          <Field label={t("s.invoiceFooter")}>
+            <Input value={invoice.footer} maxLength={300} onChange={(e) => setInvoice({ ...invoice, footer: e.target.value })} />
+          </Field>
         </>
       )}
       {tab === "agent" && (
@@ -159,7 +205,7 @@ function SettingsForm({ tab, data, onSaved }: { tab: Tab; data: ShopResp; onSave
             <Field label={t("s.maxAdvance")}>
               <Input inputMode="numeric" value={booking.maxAdvanceDays} onChange={(e) => setBooking({ ...booking, maxAdvanceDays: n(e.target.value) })} />
             </Field>
-            <Field label={t("s.cancelWindow")}>
+            <Field label={t("s.cancelWindow")} hint={t("s.cancelWindowHint")}>
               <Input inputMode="numeric" value={booking.cancelWindowMin} onChange={(e) => setBooking({ ...booking, cancelWindowMin: n(e.target.value) })} />
             </Field>
           </div>
@@ -171,6 +217,8 @@ function SettingsForm({ tab, data, onSaved }: { tab: Tab; data: ShopResp; onSave
             />
           </Field>
           <Toggle checked={booking.autoConfirm} onChange={(v) => setBooking({ ...booking, autoConfirm: v })} label={t("s.autoConfirm")} />
+          <Toggle checked={booking.customerReschedule} onChange={(v) => setBooking({ ...booking, customerReschedule: v })} label={t("s.customerReschedule")} />
+          <Toggle checked={booking.refundToWallet} onChange={(v) => setBooking({ ...booking, refundToWallet: v })} label={t("s.refundToWallet")} />
         </>
       )}
       {tab === "loyalty" && (
@@ -263,11 +311,21 @@ function SettingsForm({ tab, data, onSaved }: { tab: Tab; data: ShopResp; onSave
           <Field label={t("s.telegram")}>
             <Input dir="ltr" value={telegram} onChange={(e) => setTelegram(e.target.value)} />
           </Field>
-          <div className="rounded-xl border border-[var(--border)] p-3">
-            <p className="mb-3 text-sm font-semibold strong">
-              {t("s.igConnect")} {data.shop.instagramConnected && <span className="text-success">✓ {data.shop.igUsername}</span>}
-            </p>
-            <div className="grid gap-3 sm:grid-cols-2">
+          <div className="space-y-1 rounded-xl border border-[var(--border)] p-3">
+            <p className="text-sm font-semibold strong">{t("al.title")}</p>
+            <p className="text-xs muted">{t("al.sub")}</p>
+            <Field label={t("al.phone")} className="pt-2">
+              <Input dir="ltr" inputMode="tel" placeholder="0912 000 0000" value={alerts.phone} maxLength={20} onChange={(e) => setAlerts({ ...alerts, phone: e.target.value })} />
+            </Field>
+            <Toggle checked={alerts.onHandoff} onChange={(v) => setAlerts({ ...alerts, onHandoff: v })} label={t("al.handoff")} />
+            {shop.kind !== "services" && <Toggle checked={alerts.onOrder} onChange={(v) => setAlerts({ ...alerts, onOrder: v })} label={t("al.order")} />}
+            {shop.kind !== "retail" && <Toggle checked={alerts.onBooking} onChange={(v) => setAlerts({ ...alerts, onBooking: v })} label={t("al.booking")} />}
+          </div>
+          <InstagramConnect shop={data.shop} onChanged={onSaved} />
+          {shop.kind !== "services" && <WooConnect />}
+          <details className="rounded-xl border border-[var(--border)] p-3">
+            <summary className="cursor-pointer text-sm muted">{t("ig.manualToken")}</summary>
+            <div className="mt-3 grid gap-3 sm:grid-cols-2">
               <Field label={t("s.igId")}>
                 <Input dir="ltr" value={ig.igUserId} onChange={(e) => setIg({ ...ig, igUserId: e.target.value })} />
               </Field>
@@ -278,7 +336,7 @@ function SettingsForm({ tab, data, onSaved }: { tab: Tab; data: ShopResp; onSave
             <Field label={t("s.igToken")} className="mt-3">
               <Input dir="ltr" type="password" value={ig.accessToken} onChange={(e) => setIg({ ...ig, accessToken: e.target.value })} />
             </Field>
-          </div>
+          </details>
         </>
       )}
       <ErrorNote error={error} />
@@ -293,6 +351,229 @@ function SettingsForm({ tab, data, onSaved }: { tab: Tab; data: ShopResp; onSave
         </Button>
       </div>
     </Card>
+  );
+}
+
+function InstagramConnect({ shop: s, onChanged }: { shop: ShopResp["shop"]; onChanged: () => void }) {
+  const { t, locale } = useI18n();
+  const { shop } = useShop();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<unknown>(null);
+  const [result, setResult] = useState<string | null>(null);
+  useEffect(() => {
+    // the OAuth callback lands back here with ?ig=connected|denied|error&reason=...
+    const q = new URLSearchParams(window.location.search);
+    const ig = q.get("ig");
+    if (ig) setResult(ig === "error" ? `error.${q.get("reason") ?? "exchange"}` : ig);
+  }, []);
+  const connect = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const r = await api<{ url: string }>(`/shops/${shop.id}/instagram/oauth/start`, { method: "POST" });
+      window.location.href = r.url;
+    } catch (e) {
+      setError(e);
+      setBusy(false);
+    }
+  };
+  const disconnect = async () => {
+    if (!confirm(`${t("ig.disconnect")}?`)) return;
+    await api(`/shops/${shop.id}/instagram/disconnect`, { method: "POST" });
+    onChanged();
+  };
+  return (
+    <div className="space-y-3 rounded-xl border border-[var(--border)] p-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <p className="text-sm font-semibold strong">{t("s.igConnect")}</p>
+          {s.instagramConnected ? (
+            <p className="mt-1 text-sm text-success">
+              ✓ @{s.igUsername}
+              {s.igTokenExpiresAt && <span className="text-xs muted"> · {t("ig.renews")} {date(s.igTokenExpiresAt, locale)}</span>}
+            </p>
+          ) : (
+            <p className="mt-1 text-xs muted">{t("ig.why")}</p>
+          )}
+        </div>
+        {s.instagramConnected ? (
+          <Button size="sm" variant="ghost" onClick={disconnect}>{t("ig.disconnect")}</Button>
+        ) : (
+          <Button variant="primary" loading={busy} disabled={!s.instagramOAuth} onClick={connect}>
+            {t("ig.connectBtn")}
+          </Button>
+        )}
+      </div>
+      {!s.instagramOAuth && !s.instagramConnected && <p className="text-xs text-warning">{t("ig.notConfigured")}</p>}
+      {result && (
+        <p className={result === "connected" ? "rounded-lg bg-success/10 px-3 py-2 text-sm text-success" : "rounded-lg bg-danger/10 px-3 py-2 text-sm text-danger"}>
+          {t(`ig.result.${result}` as DictKey)}
+        </p>
+      )}
+      <ErrorNote error={error} />
+    </div>
+  );
+}
+
+interface WooImport {
+  id: string;
+  status: "queued" | "running" | "done" | "failed";
+  total: number;
+  created: number;
+  updated: number;
+  skipped: number;
+  errors: { product: string; error: string }[];
+  createdAt: string;
+}
+
+function WooConnect() {
+  const { t, locale } = useI18n();
+  const { shop } = useShop();
+  const { data, mutate } = useApi<{ connected: boolean; url: string | null; imports: WooImport[] }>(`/shops/${shop.id}/woocommerce`);
+  const [form, setForm] = useState({ url: "", key: "", secret: "" });
+  const [opts, setOpts] = useState({ unit: "toman" as "toman" | "rial", defaultStock: "0", status: "draft" as "active" | "draft" });
+  const [found, setFound] = useState<{ products: number; currency: string | null } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<unknown>(null);
+  const last = data?.imports[0];
+  const active = last && (last.status === "queued" || last.status === "running");
+  // poll only while a run is in progress
+  const { data: live } = useApi<WooImport>(active ? `/shops/${shop.id}/woocommerce/imports/${last.id}` : null, {
+    refreshInterval: 2000,
+    onSuccess: (r) => {
+      if (r.status === "done" || r.status === "failed") void mutate();
+    },
+  });
+  const run = live ?? last;
+  if (!data) return null;
+  const act = async (fn: () => Promise<unknown>) => {
+    setBusy(true);
+    setError(null);
+    try {
+      await fn();
+      await mutate();
+    } catch (e) {
+      setError(e);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const connect = () =>
+    act(async () => {
+      const r = await api<{ products: number; currency: string | null; suggestedUnit: "toman" | "rial" }>(`/shops/${shop.id}/woocommerce/connect`, { method: "POST", json: form });
+      setFound({ products: r.products, currency: r.currency });
+      setOpts((o) => ({ ...o, unit: r.suggestedUnit }));
+      setForm({ url: "", key: "", secret: "" });
+    });
+  const disconnect = () => {
+    if (!confirm(`${t("woo.disconnect")}?`)) return;
+    void act(() => api(`/shops/${shop.id}/woocommerce`, { method: "DELETE" }));
+  };
+  const start = () =>
+    act(() => api(`/shops/${shop.id}/woocommerce/import`, { method: "POST", json: { unit: opts.unit, status: opts.status, defaultStock: Number(latinDigits(opts.defaultStock)) || 0 } }));
+  return (
+    <div className="space-y-3 rounded-xl border border-[var(--border)] p-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <p className="text-sm font-semibold strong">{t("woo.title")}</p>
+          {data.connected ? (
+            <p className="mt-1 text-sm text-success" dir="auto">
+              ✓ <span dir="ltr">{data.url}</span>
+            </p>
+          ) : (
+            <p className="mt-1 text-xs muted">{t("woo.why")}</p>
+          )}
+        </div>
+        {data.connected && (
+          <Button size="sm" variant="ghost" onClick={disconnect}>
+            {t("woo.disconnect")}
+          </Button>
+        )}
+      </div>
+      {!data.connected ? (
+        <>
+          <p className="text-xs muted">{t("woo.howto")}</p>
+          <Field label={t("woo.url")}>
+            <Input dir="ltr" placeholder="https://example.com" value={form.url} onChange={(e) => setForm({ ...form, url: e.target.value })} />
+          </Field>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Field label="Consumer key">
+              <Input dir="ltr" placeholder="ck_..." value={form.key} onChange={(e) => setForm({ ...form, key: e.target.value })} />
+            </Field>
+            <Field label="Consumer secret">
+              <Input dir="ltr" type="password" placeholder="cs_..." value={form.secret} onChange={(e) => setForm({ ...form, secret: e.target.value })} />
+            </Field>
+          </div>
+          <div className="flex justify-end">
+            <Button variant="primary" loading={busy} disabled={!form.url || !form.key || !form.secret} onClick={connect}>
+              {t("woo.connect")}
+            </Button>
+          </div>
+        </>
+      ) : (
+        <>
+          {found && (
+            <p className="rounded-lg bg-success/10 px-3 py-2 text-sm text-success">
+              {t("woo.found").replace("{n}", String(found.products))}
+              {found.currency && <span dir="ltr"> ({found.currency})</span>}
+            </p>
+          )}
+          <div className="grid gap-3 sm:grid-cols-3">
+            <Field label={t("woo.unit")}>
+              <Select value={opts.unit} onChange={(e) => setOpts({ ...opts, unit: e.target.value as "toman" | "rial" })}>
+                <option value="toman">{t("woo.toman")}</option>
+                <option value="rial">{t("woo.rial")}</option>
+              </Select>
+            </Field>
+            <Field label={t("woo.stock")}>
+              <Input inputMode="numeric" value={opts.defaultStock} onChange={(e) => setOpts({ ...opts, defaultStock: e.target.value })} />
+            </Field>
+            <Field label={t("woo.status")}>
+              <Select value={opts.status} onChange={(e) => setOpts({ ...opts, status: e.target.value as "active" | "draft" })}>
+                <option value="draft">{t("woo.draft")}</option>
+                <option value="active">{t("woo.active")}</option>
+              </Select>
+            </Field>
+          </div>
+          <p className="text-xs muted">{t("woo.note")}</p>
+          <div className="flex justify-end">
+            <Button variant="primary" loading={busy || Boolean(active)} onClick={start}>
+              {last ? t("woo.reimport") : t("woo.import")}
+            </Button>
+          </div>
+          {run && (
+            <div className="space-y-2 rounded-lg bg-[var(--surface-sunken)] p-3 text-sm">
+              <p className="flex flex-wrap items-center justify-between gap-2">
+                <span className="strong">{t(`woo.st.${run.status}` as DictKey)}</span>
+                <span className="text-xs muted">{dateTime(run.createdAt, locale)}</span>
+              </p>
+              {run.total > 0 && (
+                <div className="h-1.5 overflow-hidden rounded-full bg-[var(--border)]" role="progressbar" aria-valuemin={0} aria-valuemax={run.total} aria-valuenow={run.created + run.updated + run.skipped + run.errors.length}>
+                  <div className="h-full rounded-full bg-[var(--accent)] transition-[width]" style={{ width: `${Math.min(100, ((run.created + run.updated + run.skipped + run.errors.length) / run.total) * 100)}%` }} />
+                </div>
+              )}
+              <p className="num text-xs muted">
+                {t("woo.created")} {run.created} · {t("woo.updated")} {run.updated} · {t("woo.skipped")} {run.skipped} · {t("woo.failed")} {run.errors.length}
+                {run.total > 0 && ` / ${run.total}`}
+              </p>
+              {run.errors.length > 0 && (
+                <details>
+                  <summary className="cursor-pointer text-xs text-danger">{t("woo.errors")}</summary>
+                  <ul className="mt-2 space-y-1 text-xs">
+                    {run.errors.map((e, i) => (
+                      <li key={i}>
+                        <span className="strong">{e.product}</span>: <span dir="ltr">{e.error}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              )}
+            </div>
+          )}
+        </>
+      )}
+      <ErrorNote error={error} />
+    </div>
   );
 }
 

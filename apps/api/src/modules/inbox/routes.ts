@@ -1,7 +1,7 @@
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
 import { and, desc, eq, lt, sql } from "drizzle-orm";
 import { z } from "zod";
-import { conversations, customers, messages, shops } from "@shopino/db";
+import { appointments, conversations, customers, messages, orders, shops } from "@shopino/db";
 import type { Ctx } from "../../lib/context";
 import { invalidateShopCache, requireFeature, requireShop } from "../../lib/auth";
 import { audit } from "../../lib/audit";
@@ -47,7 +47,27 @@ export const inboxRoutes =
       if (!conv) throw notFound("conversation");
       const rows = await ctx.db.select().from(messages).where(eq(messages.conversationId, conv.id)).orderBy(desc(messages.createdAt)).limit(100);
       await ctx.db.update(conversations).set({ unread: 0 }).where(eq(conversations.id, conv.id));
-      return { conversation: conv, messages: rows.reverse(), agentRuns: await recentRuns(ctx.db, conv.id) };
+      // what this chat led to on the shop's site (orders/bookings placed there carry the conversation)
+      const [siteOrders, siteBookings] = await Promise.all([
+        ctx.db
+          .select({ id: orders.id, code: orders.code, total: orders.total, status: orders.status, paymentStatus: orders.paymentStatus })
+          .from(orders)
+          .where(and(eq(orders.conversationId, conv.id), eq(orders.channel, "web")))
+          .orderBy(desc(orders.createdAt))
+          .limit(10),
+        ctx.db
+          .select({ id: appointments.id, code: appointments.code, status: appointments.status, startsAt: appointments.startsAt })
+          .from(appointments)
+          .where(and(eq(appointments.conversationId, conv.id), eq(appointments.channel, "web")))
+          .orderBy(desc(appointments.createdAt))
+          .limit(10),
+      ]);
+      return {
+        conversation: conv,
+        messages: rows.reverse(),
+        agentRuns: await recentRuns(ctx.db, conv.id),
+        site: { visits: conv.siteVisits, lastAt: conv.lastSiteVisitAt, lastPath: conv.lastSitePath, orders: siteOrders, bookings: siteBookings },
+      };
     });
 
     app.post(

@@ -7,6 +7,7 @@ import { Button, ErrorNote, Field, Input, Select, Spinner, Textarea } from "@/co
 import { ApiError, api, useApi } from "@/lib/api";
 import { latinDigits } from "@/lib/format";
 import { useI18n } from "@/lib/locale-client";
+import { shopAccent } from "@/lib/brand";
 
 interface PublicForm {
   form: { id: string; title: string; description: string; fields: { key: string; label: string; type: string; required: boolean; options?: string[] }[] };
@@ -33,7 +34,7 @@ function FormView({ id }: { id: string }) {
   const [err, setErr] = useState<unknown>(null);
   if (error) return <p className="p-10 text-center muted">{t("common.error")}</p>;
   if (!data) return <Spinner className="mx-auto mt-20" />;
-  const brand = data.shop?.brandColor && data.shop.brandColor !== "#d9d0b8" ? data.shop.brandColor : "#1b263b";
+  const brand = shopAccent(data.shop?.brandColor);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();

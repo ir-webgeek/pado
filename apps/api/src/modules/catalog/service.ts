@@ -42,14 +42,14 @@ export async function getProduct(db: DbOrTx, shopId: string, productId: string) 
   return { ...p, variants };
 }
 
-async function assertProductLimit(db: DbOrTx, shop: ShopCtx) {
+async function assertProductLimit(db: DbOrTx, shop: Pick<ShopCtx, "id" | "plan">) {
   const limit = PLANS[shop.plan].limits.products;
   if (limit === null) return;
   const [row] = await db.select({ n: sql<number>`count(*)::int` }).from(products).where(eq(products.shopId, shop.id));
   if ((row?.n ?? 0) >= limit) throw paymentRequired("plan_limit_products", `your plan allows ${limit} products`);
 }
 
-export async function upsertProduct(db: DbOrTx, shop: ShopCtx, input: ProductInput, actorId: string, productId?: string) {
+export async function upsertProduct(db: DbOrTx, shop: Pick<ShopCtx, "id" | "plan">, input: ProductInput, actorId: string, productId?: string) {
   if (input.categoryId) {
     const cat = await db.query.categories.findFirst({ where: and(eq(categories.id, input.categoryId), eq(categories.shopId, shop.id)) });
     if (!cat) throw badRequest("invalid_category");

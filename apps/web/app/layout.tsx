@@ -1,6 +1,8 @@
 import type { Metadata, Viewport } from "next";
 import localFont from "next/font/local";
 import { dirOf } from "@/lib/i18n";
+import { DmRefTracker } from "@/components/dm-ref";
+import { PwaSetup } from "@/components/pwa";
 import { LocaleProvider } from "@/lib/locale-client";
 import { getT } from "@/lib/locale-server";
 import "./globals.css";
@@ -12,13 +14,24 @@ export async function generateMetadata(): Promise<Metadata> {
   return {
     title: { default: `${t("brand.name")} | ${t("brand.tagline")}`, template: `%s | ${t("brand.name")}` },
     description: t("hero.sub"),
+    applicationName: t("brand.name"),
+    appleWebApp: { capable: true, title: t("brand.name"), statusBarStyle: "black-translucent" },
+    icons: { apple: "/icons/apple-touch-icon.png" },
   };
 }
 
-export const viewport: Viewport = { themeColor: "#0b1120", width: "device-width", initialScale: 1 };
+export const viewport: Viewport = {
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#f6f5fb" },
+    { media: "(prefers-color-scheme: dark)", color: "#0b0916" },
+  ],
+  width: "device-width",
+  initialScale: 1,
+};
 
-// applied before paint so the saved theme never flashes
-const themeScript = `try{var t=localStorage.getItem("theme");if(t)document.documentElement.dataset.theme=t}catch(e){}`;
+// Runs before paint so the theme never flashes. "day"/"night" are explicit choices; anything else
+// follows the OS and keeps following it when the OS switches.
+const themeScript = `document.documentElement.classList.add("js");try{var d=document.documentElement,m=matchMedia("(prefers-color-scheme: light)");window.__applyTheme=function(){var t=localStorage.getItem("theme");d.dataset.theme=t==="day"||t==="night"?t:m.matches?"day":"night"};__applyTheme();m.addEventListener("change",__applyTheme)}catch(e){}`;
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   const { locale } = await getT();
@@ -29,6 +42,8 @@ export default async function RootLayout({ children }: { children: React.ReactNo
       </head>
       <body className="font-sans">
         <LocaleProvider locale={locale}>{children}</LocaleProvider>
+        <PwaSetup />
+        <DmRefTracker />
       </body>
     </html>
   );

@@ -1,10 +1,24 @@
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
-import { and, eq } from "drizzle-orm";
+import { and, eq, type SQL } from "drizzle-orm";
 import { z } from "zod";
-import { resolveShopSettings, shopMembers, shops, shippingMethods, staff, users, walletTransactions } from "@shopino/db";
+import {
+  appointments,
+  orders,
+  products,
+  resolveShopSettings,
+  services,
+  shopMembers,
+  shops,
+  shippingMethods,
+  staff,
+  users,
+  walletTransactions,
+  workingHours,
+} from "@shopino/db";
 import { MEMBER_ROLES, PLANS, createShopSchema, normalizeIranPhone, updateShopSettingsSchema } from "@shopino/shared";
 import type { Ctx } from "../../lib/context";
 import { authenticate, invalidateShopCache, requireShop } from "../../lib/auth";
+import { instagramOAuthConfigured } from "../instagram/oauth";
 import { audit } from "../../lib/audit";
 import { badRequest, conflict, notFound } from "../../lib/errors";
 
@@ -52,25 +66,65 @@ export const shopRoutes =
     app.get("/:shopId", { preHandler: requireShop(ctx), schema: { params: shopParams } }, async (req) => {
       const shop = await ctx.db.query.shops.findFirst({ where: eq(shops.id, req.shop.id) });
       if (!shop) throw notFound("shop");
-      const { igAccessToken, ...rest } = shop;
+      const { igAccessToken, wooConsumerKey, wooConsumerSecret: _wooSecret, ...rest } = shop;
       return {
-        shop: { ...rest, settings: resolveShopSettings(shop.settings), instagramConnected: Boolean(igAccessToken) },
+        shop: { ...rest, settings: resolveShopSettings(shop.settings), instagramConnected: Boolean(igAccessToken), instagramOAuth: instagramOAuthConfigured(), wooConnected: Boolean(wooConsumerKey) },
         role: req.shop.role,
         plan: PLANS[shop.plan],
       };
+    });
+
+    /** Guided setup: which first-run steps this shop has done, derived from its data (never stored). */
+    app.get("/:shopId/setup", { preHandler: requireShop(ctx), schema: { params: shopParams } }, async (req) => {
+      const shopId = req.shop.id;
+      const shop = await ctx.db.query.shops.findFirst({ where: eq(shops.id, shopId) });
+      if (!shop) throw notFound("shop");
+      const settings = resolveShopSettings(shop.settings);
+      const one = (table: typeof products | typeof services | typeof workingHours | typeof orders | typeof appointments, extra?: SQL) =>
+        ctx.db
+          .select({ id: table.id })
+          .from(table)
+          .where(and(eq(table.shopId, shopId), extra))
+          .limit(1)
+          .then((r) => r.length > 0);
+      const sells = shop.kind !== "services";
+      const books = shop.kind !== "retail";
+      const [hasProduct, hasService, hasHours, hasOrder, hasBooking] = await Promise.all([
+        sells ? one(products, eq(products.status, "active")) : false,
+        books ? one(services, eq(services.active, true)) : false,
+        books ? one(workingHours) : false,
+        sells ? one(orders) : false,
+        books ? one(appointments) : false,
+      ]);
+      const steps = [
+        { key: "brand", done: Boolean(shop.logo) || shop.brandColor !== "#d9d0b8", href: "/panel/settings" },
+        ...(sells ? [{ key: "product", done: hasProduct, href: "/panel/products" }] : []),
+        ...(books ? [{ key: "service", done: hasService, href: "/panel/services" }] : []),
+        ...(books ? [{ key: "hours", done: hasHours, href: "/panel/services" }] : []),
+        { key: "payment", done: Boolean(settings.cardToCard.cardNumber || shop.settlementIban), href: "/panel/settings?tab=payments" },
+        ...(sells ? [{ key: "invoice", done: Boolean(settings.invoice.phone || settings.invoice.address), href: "/panel/settings" }] : []),
+        { key: "instagram", done: Boolean(shop.igAccessToken), href: "/panel/settings?tab=integrations" },
+        { key: "firstSale", done: hasOrder || hasBooking, href: books ? `/b/${shop.slug}` : `/s/${shop.slug}` },
+      ];
+      return { steps, done: steps.filter((s) => s.done).length, total: steps.length };
     });
 
     app.patch(
       "/:shopId/settings",
       { preHandler: requireShop(ctx, "admin"), schema: { params: shopParams, body: updateShopSettingsSchema } },
       async (req) => {
-        const { name, kind, brandColor, theme, timezone, telegramChatId, settlementIban, ...nested } = req.body;
+        const { name, kind, brandColor, theme, timezone, logo, telegramChatId, settlementIban, ...nested } = req.body;
         if (timezone) {
           try {
             new Intl.DateTimeFormat("en", { timeZone: timezone });
           } catch {
             throw badRequest("invalid_timezone");
           }
+        }
+        if (nested.alerts?.phone) {
+          const phone = normalizeIranPhone(nested.alerts.phone);
+          if (!phone) throw badRequest("invalid_phone", "enter a valid Iranian mobile number");
+          nested.alerts.phone = phone;
         }
         const current = await ctx.db.query.shops.findFirst({ where: eq(shops.id, req.shop.id), columns: { settings: true } });
         const merged = { ...(current?.settings ?? {}) } as Record<string, unknown>;
@@ -80,7 +134,7 @@ export const shopRoutes =
         }
         const [updated] = await ctx.db
           .update(shops)
-          .set({ name, kind, brandColor, theme, timezone, telegramChatId, settlementIban, settings: merged })
+          .set({ name, kind, brandColor, theme, timezone, logo, telegramChatId, settlementIban, settings: merged })
           .where(eq(shops.id, req.shop.id))
           .returning();
         invalidateShopCache(req.shop.id);

@@ -38,6 +38,9 @@ const envSchema = z.object({
   META_APP_SECRET: z.string().optional(),
   META_VERIFY_TOKEN: z.string().default("shopino-verify"),
   META_GRAPH_VERSION: z.string().default("v25.0"),
+  /** Instagram API with Instagram Login (business login): App Dashboard > Instagram > API setup */
+  INSTAGRAM_APP_ID: z.string().optional(),
+  INSTAGRAM_APP_SECRET: z.string().optional(),
 
   TELEGRAM_BOT_TOKEN: z.string().optional(),
 

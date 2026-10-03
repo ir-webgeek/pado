@@ -34,6 +34,7 @@ import { badRequest, conflict, notFound, paymentRequired } from "../../lib/error
 import type { Queues } from "../../lib/queues";
 import { recordPurchase, upsertCustomer } from "../customers/service";
 import { consumeDiscount, evaluateDiscount } from "../discounts/service";
+import { customerWalletMove } from "../wallet/service";
 import { computeSlots, pickStaff, type BusyBlock, type DaySlots, type StaffAvailabilityInput } from "./slots";
 
 const MIN = 60_000;
@@ -270,6 +271,7 @@ export async function rescheduleAppointment(db: Database, queues: Queues, shopId
 
   const updated = await db.transaction(async (tx) => {
     const { shop, settings } = await loadShop(tx, shopId);
+    if (!byShop && !settings.booking.customerReschedule) throw conflict("reschedule_disabled", "this shop does not allow online rescheduling");
     if (!byShop && current.startsAt.getTime() - Date.now() < settings.booking.cancelWindowMin * MIN) {
       throw conflict("too_late", "it is too late to change this appointment");
     }
@@ -315,6 +317,8 @@ export async function transitionAppointment(
   actor: Actor,
   reason?: string,
   cancelledBy: "customer" | "shop" | "system" = "shop",
+  /** extra writes that must commit together with the status change (e.g. a cancellation refund) */
+  within?: (tx: Tx, appt: typeof appointments.$inferSelect) => Promise<void>,
 ) {
   const result = await db.transaction(async (tx) => {
     const [a] = await tx.select().from(appointments).where(and(eq(appointments.id, appointmentId), eq(appointments.shopId, shopId))).for("update");
@@ -343,11 +347,67 @@ export async function transitionAppointment(
       await tx.update(customers).set({ noShowCount: sql`${customers.noShowCount} + 1` }).where(eq(customers.id, a.customerId));
     }
     await audit(tx, shopId, actor, `appointment.${to}`, "appointment", a.id, { reason });
+    if (within) await within(tx, row!);
     return { appt: row!, changed: true };
   });
   if (result.changed && to === "cancelled") await queues.add("notify.appointment-cancelled", { appointmentId });
   if (result.changed && to === "confirmed") await queues.add("notify.appointment-booked", { appointmentId });
   return result.appt;
+}
+
+/**
+ * Credits what was paid for a cancelled booking to the customer's wallet at that shop. Idempotent: the
+ * conditional update only matches a paid, cancelled booking with no settled refund yet.
+ */
+export async function refundAppointmentToWallet(db: Database, shopId: string, appointmentId: string, actor: Actor) {
+  return db.transaction((tx) => refundToWalletTx(tx, shopId, appointmentId, actor));
+}
+
+async function refundToWalletTx(tx: Tx, shopId: string, appointmentId: string, actor: Actor) {
+  const [a] = await tx
+    .update(appointments)
+    .set({ refundStatus: "wallet", paymentStatus: "refunded" })
+    .where(
+      and(
+        eq(appointments.id, appointmentId),
+        eq(appointments.shopId, shopId),
+        eq(appointments.status, "cancelled"),
+        gt(appointments.paidAmount, 0),
+        or(isNull(appointments.refundStatus), eq(appointments.refundStatus, "requested")),
+      ),
+    )
+    .returning();
+  if (!a) return null;
+  await customerWalletMove(tx, a.shopId, a.customerId, a.paidAmount, "refund", { type: "appointment", id: a.id });
+  await audit(tx, a.shopId, actor, "appointment.refund_wallet", "appointment", a.id, { amount: a.paidAmount });
+  return a;
+}
+
+/**
+ * Cancellation by the customer (booking link or portal). Inside the policy window only. Paid money goes
+ * to the customer's wallet when the shop enabled it, otherwise it waits for the shop to settle.
+ */
+export async function customerCancelAppointment(db: Database, queues: Queues, appointmentId: string, reason?: string) {
+  const a = await db.query.appointments.findFirst({ where: eq(appointments.id, appointmentId) });
+  if (!a) throw notFound("appointment");
+  const { settings } = await loadShop(db, a.shopId);
+  if (a.startsAt.getTime() - Date.now() < settings.booking.cancelWindowMin * MIN) {
+    throw conflict("too_late", "online cancellation window has passed - please contact the shop");
+  }
+  let refund: "wallet" | "requested" | null = null;
+  // the cancellation and its refund commit together, so a crash cannot leave a paid booking cancelled
+  // with neither a wallet credit nor a pending refund request
+  const updated = await transitionAppointment(db, queues, a.shopId, a.id, "cancelled", { type: "customer" }, reason, "customer", async (tx, row) => {
+    if (row.paidAmount <= 0) return;
+    if (settings.booking.refundToWallet) {
+      if (await refundToWalletTx(tx, row.shopId, row.id, { type: "customer" })) refund = "wallet";
+    } else {
+      await tx.update(appointments).set({ refundStatus: "requested" }).where(and(eq(appointments.id, row.id), isNull(appointments.refundStatus)));
+      refund = "requested";
+    }
+  });
+  if (refund === "wallet") await queues.add("notify.wallet-refund", { appointmentId: a.id });
+  return { status: updated.status, refund, amount: updated.paidAmount };
 }
 
 /** Deposit or full payment received for an appointment. Idempotent. */

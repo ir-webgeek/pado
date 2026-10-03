@@ -29,6 +29,55 @@
       "when": 1790297784833,
       "tag": "0003_settlement_iban",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1790970543430,
+      "tag": "0004_customer_wallet",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1790971135225,
+      "tag": "0005_service_media",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1790971608463,
+      "tag": "0006_stock_receipts",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1790971716537,
+      "tag": "0007_expenses",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1790973163942,
+      "tag": "0008_ig_token_expiry",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1790973678521,
+      "tag": "0009_dm_site_visits",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1790973923837,
+      "tag": "0010_woocommerce",
+      "breakpoints": true
     }
   ]
 }

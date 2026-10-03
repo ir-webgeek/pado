@@ -1,7 +1,7 @@
 "use client";
 
 import clsx from "clsx";
-import { CalendarCheck2, LogOut, Package } from "lucide-react";
+import { CalendarCheck2, LogOut, Package, Wallet } from "lucide-react";
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { addDaysIso, zonedIsoDate } from "@shopino/shared";
@@ -13,6 +13,7 @@ import { latinDigits, money, time } from "@/lib/format";
 import type { DictKey } from "@/lib/i18n";
 import { useI18n } from "@/lib/locale-client";
 import type { DaySlots } from "@/lib/types";
+import { PLATFORM_ACCENT } from "@/lib/brand";
 
 interface MyAppointment {
   id: string;
@@ -45,7 +46,7 @@ export default function MyPage() {
   const { t } = useI18n();
   const { data: me, error, mutate } = useApi<{ phone: string; name: string | null }>("/customer/me", { shouldRetryOnError: false });
   return (
-    <div data-theme="day" className="min-h-dvh bg-[var(--bg)] text-[var(--text-body)]" style={{ "--accent": "#1b263b" } as React.CSSProperties}>
+    <div data-theme="day" className="min-h-dvh bg-[var(--bg)] text-[var(--text-body)]" style={{ "--accent": PLATFORM_ACCENT } as React.CSSProperties}>
       <header className="border-b border-[var(--border)] bg-[var(--bg-elev)]">
         <div className="mx-auto flex h-14 max-w-2xl items-center justify-between px-4">
           <Link href="/"><Logo label={t("brand.name")} /></Link>
@@ -115,9 +116,11 @@ function Login({ onDone }: { onDone: () => void }) {
 
 function Portal({ name, phone }: { name: string | null; phone: string }) {
   const { t, locale } = useI18n();
-  const [tab, setTab] = useState<"upcoming" | "past" | "orders">("upcoming");
+  const [tab, setTab] = useState<"upcoming" | "past" | "orders" | "wallet">("upcoming");
   const { data: appts, mutate } = useApi<MyAppointment[]>("/customer/appointments");
   const { data: orders } = useApi<MyOrder[]>(tab === "orders" ? "/customer/orders" : null);
+  const { data: me, mutate: reloadMe } = useApi<{ shops: { id: string; name: string; walletBalance: number }[] }>("/customer/me");
+  const walletTotal = (me?.shops ?? []).reduce((s, x) => s + x.walletBalance, 0);
   const [moving, setMoving] = useState<MyAppointment | null>(null);
   const [error, setError] = useState<unknown>(null);
   const [note, setNote] = useState<string | null>(null);
@@ -129,9 +132,11 @@ function Portal({ name, phone }: { name: string | null; phone: string }) {
     if (!confirm(`${t("bk.cancel")}؟`)) return;
     setError(null);
     try {
-      const r = await api<{ refundRequested: boolean }>(`/customer/appointments/${a.id}/cancel`, { method: "POST", json: {} });
-      if (r.refundRequested) setNote(t("me.refundNote"));
+      const r = await api<{ refund: "wallet" | "requested" | null }>(`/customer/appointments/${a.id}/cancel`, { method: "POST", json: {} });
+      if (r.refund === "wallet") setNote(t("w.refunded"));
+      else if (r.refund === "requested") setNote(t("me.refundNote"));
       mutate();
+      reloadMe();
     } catch (e) {
       setError(e);
     }
@@ -150,11 +155,14 @@ function Portal({ name, phone }: { name: string | null; phone: string }) {
           { value: "upcoming", label: t("me.upcoming"), count: upcoming.length },
           { value: "past", label: t("me.past") },
           { value: "orders", label: t("me.orders") },
+          { value: "wallet", label: walletTotal > 0 ? `${t("p.wallet")} · ${money(walletTotal, locale, false)}` : t("p.wallet") },
         ]}
       />
       {note && <p className="rounded-xl bg-warning/10 px-3 py-2 text-sm text-warning">{note}</p>}
       <ErrorNote error={error} />
-      {tab === "orders" ? (
+      {tab === "wallet" ? (
+        <MyWallet shops={me?.shops ?? []} />
+      ) : tab === "orders" ? (
         !orders ? (
           <Spinner />
         ) : orders.length === 0 ? (
@@ -205,6 +213,41 @@ function Portal({ name, phone }: { name: string | null; phone: string }) {
         ))
       )}
       {moving && <Reschedule appt={moving} onClose={() => setMoving(null)} onDone={() => (setMoving(null), mutate())} />}
+    </div>
+  );
+}
+
+function MyWallet({ shops }: { shops: { id: string; name: string; walletBalance: number }[] }) {
+  const { t, locale } = useI18n();
+  const { data: history } = useApi<{ id: string; amount: number; reason: string; shopName: string; createdAt: string }[]>("/customer/wallet");
+  const funded = shops.filter((s) => s.walletBalance > 0);
+  return (
+    <div className="space-y-3">
+      {funded.length === 0 ? (
+        <Card><Empty icon={<Wallet className="size-6" />} title={t("me.empty")} /></Card>
+      ) : (
+        funded.map((s) => (
+          <Card key={s.id} className="flex items-center justify-between">
+            <span className="font-semibold strong">{s.name}</span>
+            <span className="num font-bold strong">{money(s.walletBalance, locale)}</span>
+          </Card>
+        ))
+      )}
+      {history && history.length > 0 && (
+        <Card className="space-y-1.5">
+          {history.map((h) => (
+            <div key={h.id} className="flex items-center justify-between gap-2 text-sm">
+              <span className="truncate">
+                {t(`w.reason.${h.reason}` as DictKey)} · <span className="muted">{h.shopName}</span>
+              </span>
+              <span className={clsx("num", h.amount > 0 ? "text-success" : "text-danger")} dir="ltr">
+                {h.amount > 0 ? "+" : ""}
+                {money(h.amount, locale, false)}
+              </span>
+            </div>
+          ))}
+        </Card>
+      )}
     </div>
   );
 }

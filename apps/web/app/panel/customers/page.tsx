@@ -1,10 +1,11 @@
 "use client";
 
+import clsx from "clsx";
 import { Crown, Megaphone, Search, Users } from "lucide-react";
 import { useState } from "react";
 import { Avatar, Badge, Button, Card, Empty, ErrorNote, Field, Input, Modal, PageHeader, Select, Spinner, Tabs, Textarea, statusTone } from "@/components/ui";
 import { api, useApi } from "@/lib/api";
-import { date, dateTime, money, num } from "@/lib/format";
+import { date, dateTime, latinDigits, money, num } from "@/lib/format";
 import type { DictKey } from "@/lib/i18n";
 import { useI18n } from "@/lib/locale-client";
 import { useShop } from "@/lib/shop";
@@ -115,11 +116,12 @@ export default function CustomersPage() {
 function CustomerModal({ id, onClose }: { id: string; onClose: () => void }) {
   const { t, locale } = useI18n();
   const { shop } = useShop();
-  const { data } = useApi<{
+  const { data, mutate } = useApi<{
     customer: Customer;
     orders: { id: string; code: string; total: number; status: string; createdAt: string }[];
     appointments: { id: string; serviceName: string; startsAt: string; status: string }[];
     points: { id: string; delta: number; reason: string; createdAt: string }[];
+    wallet: WalletTx[];
   }>(`/shops/${shop.id}/customers/${id}`);
   const [notes, setNotes] = useState<string | null>(null);
   if (!data) return null;
@@ -132,12 +134,13 @@ function CustomerModal({ id, onClose }: { id: string; onClose: () => void }) {
           {c.phone && <span className="num text-sm muted" dir="ltr">{c.phone}</span>}
           {c.instagramUsername && <span className="text-sm muted" dir="ltr">@{c.instagramUsername}</span>}
         </div>
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
           {[
             [t("c.spent"), money(c.totalSpent, locale)],
             [t("c.orders"), num(c.ordersCount, locale)],
             [t("c.visits"), num(c.appointmentsCount, locale)],
             [t("c.points"), num(c.points, locale)],
+            [t("w.customer"), money(c.walletBalance, locale)],
           ].map(([k, v]) => (
             <div key={k} className="rounded-xl bg-[var(--surface-sunken)] p-3">
               <p className="text-[11px] muted">{k}</p>
@@ -177,8 +180,75 @@ function CustomerModal({ id, onClose }: { id: string; onClose: () => void }) {
             </ul>
           </div>
         </div>
+        <CustomerWallet customerId={c.id} history={data.wallet} onChanged={() => mutate()} />
       </div>
     </Modal>
+  );
+}
+
+interface WalletTx {
+  id: string;
+  amount: number;
+  balanceAfter: number;
+  reason: string;
+  note: string | null;
+  createdAt: string;
+}
+
+function CustomerWallet({ customerId, history, onChanged }: { customerId: string; history: WalletTx[]; onChanged: () => void }) {
+  const { t, locale } = useI18n();
+  const { shop } = useShop();
+  const [amount, setAmount] = useState("");
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<unknown>(null);
+  const value = Number(latinDigits(amount).replace(/[^\d-]/g, "") || 0);
+  async function adjust() {
+    setBusy(true);
+    setError(null);
+    try {
+      await api(`/shops/${shop.id}/customers/${customerId}/wallet`, { method: "POST", json: { amount: value, note: note || undefined } });
+      setAmount("");
+      setNote("");
+      onChanged();
+    } catch (e) {
+      setError(e);
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <div className="space-y-2 rounded-xl border border-[var(--border)] p-3">
+      <p className="label">{t("w.adjust")}</p>
+      <div className="flex flex-wrap gap-2">
+        <Input className="!w-40" dir="ltr" inputMode="numeric" placeholder="-50000" value={amount} onChange={(e) => setAmount(e.target.value)} />
+        <Input className="min-w-40 flex-1" placeholder={t("ap.note")} value={note} onChange={(e) => setNote(e.target.value)} />
+        <Button loading={busy} disabled={!value} onClick={adjust}>
+          {t("a.save")}
+        </Button>
+      </div>
+      <p className="text-xs muted">{t("w.amountHint")}</p>
+      <ErrorNote error={error} />
+      {history.length > 0 && (
+        <ul className="space-y-1 text-sm">
+          {history.map((h) => (
+            <li key={h.id} className="flex items-center justify-between gap-2 rounded-lg bg-[var(--surface-sunken)] px-3 py-1.5">
+              <span className="truncate">
+                {t(`w.reason.${h.reason}` as DictKey)}
+                {h.note && <span className="muted"> · {h.note}</span>}
+              </span>
+              <span className="flex items-center gap-3">
+                <span className={clsx("num", h.amount > 0 ? "text-success" : "text-danger")} dir="ltr">
+                  {h.amount > 0 ? "+" : ""}
+                  {num(h.amount, locale)}
+                </span>
+                <span className="text-xs muted">{dateTime(h.createdAt, locale)}</span>
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }
 

@@ -208,8 +208,9 @@ export async function markOrderPaid(tx: Tx, orderId: string, actor: Actor, meta:
           wasExpired ? sql`${productVariants.stock} - ${it.quantity} >= ${productVariants.reserved}` : undefined,
         ),
       )
-      .returning({ stock: productVariants.stock });
+      .returning({ stock: productVariants.stock, cost: productVariants.costPrice });
     if (!row) throw conflict("out_of_stock", `${it.title} is out of stock`);
+    if (row.cost !== null) await tx.update(orderItems).set({ unitCost: row.cost }).where(eq(orderItems.id, it.id));
     await tx.execute(
       sql`INSERT INTO inventory_movements (shop_id, variant_id, delta, stock_after, reason, ref_type, ref_id) VALUES (${o.shopId}, ${it.variantId}, ${-it.quantity}, ${row.stock}, 'sale', 'order', ${o.id})`,
     );

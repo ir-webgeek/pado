@@ -3,7 +3,9 @@
 import clsx from "clsx";
 import {
   CalendarClock,
+  ChartColumn,
   ClipboardList,
+  Warehouse,
   Images,
   ShieldCheck,
   Sparkles,
@@ -17,6 +19,7 @@ import {
   Package,
   Scissors,
   Settings,
+  Smartphone,
   ShoppingBag,
   Users,
 } from "lucide-react";
@@ -50,6 +53,7 @@ const groups: { key: DictKey; items: NavItem[] }[] = [
       { href: "/panel", key: "p.dashboard", icon: LayoutGrid },
       { href: "/panel/orders", key: "p.orders", icon: ShoppingBag, kinds: ["retail", "hybrid"] },
       { href: "/panel/products", key: "p.products", icon: Package, kinds: ["retail", "hybrid"] },
+      { href: "/panel/inventory", key: "p.inventory", icon: Warehouse, kinds: ["retail", "hybrid"] },
     ],
   },
   {
@@ -71,9 +75,18 @@ const groups: { key: DictKey; items: NavItem[] }[] = [
   },
   {
     key: "p.group.growth",
-    items: [{ href: "/panel/customers", key: "p.customers", icon: Users }],
+    items: [
+      { href: "/panel/customers", key: "p.customers", icon: Users },
+      { href: "/panel/reports", key: "p.reports", icon: ChartColumn },
+    ],
   },
-  { key: "p.group.account", items: [{ href: "/panel/settings", key: "p.settings", icon: Settings }] },
+  {
+    key: "p.group.account",
+    items: [
+      { href: "/panel/settings", key: "p.settings", icon: Settings },
+      { href: "/install", key: "pwa.link", icon: Smartphone },
+    ],
+  },
 ];
 
 export default function PanelLayout({ children }: { children: React.ReactNode }) {
@@ -192,7 +205,10 @@ export default function PanelLayout({ children }: { children: React.ReactNode })
                 <ThemeToggle />
               </div>
             </div>
-            {children}
+            {/* keyed by route so each page enters with the same soft rise */}
+            <div key={pathname} className="animate-rise">
+              {children}
+            </div>
           </main>
         </div>
 

@@ -99,6 +99,10 @@ export interface ShopSettings {
     cancelWindowMin: number;
     autoConfirm: boolean;
     reminderOffsetsMin: number[];
+    /** customers may move their own booking (before cancelWindowMin) */
+    customerReschedule: boolean;
+    /** money paid for a booking the customer cancels in time goes straight to their shop wallet */
+    refundToWallet: boolean;
   };
   agent: {
     enabled: boolean;
@@ -112,6 +116,10 @@ export interface ShopSettings {
     learnedStyle: string;
   };
   cardToCard: { cardNumber: string; holder: string; bank: string };
+  /** SMS alerts to the shop manager */
+  alerts: { phone: string; onHandoff: boolean; onOrder: boolean; onBooking: boolean };
+  /** seller details printed on invoices and shipping labels */
+  invoice: { address: string; phone: string; postalCode: string; footer: string };
   /** optional USD-linked pricing: variant price = priceUsd x rate x (1 + markup), rounded */
   pricing: { usdEnabled: boolean; usdRate: number; markupPercent: number; roundTo: number; rateUpdatedAt: string | null; autoFetch: boolean };
 }
@@ -127,6 +135,8 @@ export const DEFAULT_SHOP_SETTINGS: ShopSettings = {
     cancelWindowMin: 180,
     autoConfirm: true,
     reminderOffsetsMin: [24 * 60, 120],
+    customerReschedule: true,
+    refundToWallet: false,
   },
   agent: {
     enabled: false,
@@ -138,6 +148,8 @@ export const DEFAULT_SHOP_SETTINGS: ShopSettings = {
     learnedStyle: "",
   },
   cardToCard: { cardNumber: "", holder: "", bank: "" },
+  invoice: { address: "", phone: "", postalCode: "", footer: "" },
+  alerts: { phone: "", onHandoff: true, onOrder: true, onBooking: false },
   pricing: { usdEnabled: false, usdRate: 0, markupPercent: 0, roundTo: 1000, rateUpdatedAt: null, autoFetch: false },
 };
 
@@ -153,6 +165,8 @@ export function resolveShopSettings(stored: PartialShopSettings | null | undefin
     booking: { ...DEFAULT_SHOP_SETTINGS.booking, ...s.booking },
     agent: { ...DEFAULT_SHOP_SETTINGS.agent, ...s.agent },
     cardToCard: { ...DEFAULT_SHOP_SETTINGS.cardToCard, ...s.cardToCard },
+    invoice: { ...DEFAULT_SHOP_SETTINGS.invoice, ...s.invoice },
+    alerts: { ...DEFAULT_SHOP_SETTINGS.alerts, ...s.alerts },
     pricing: { ...DEFAULT_SHOP_SETTINGS.pricing, ...s.pricing },
   };
 }
@@ -191,6 +205,12 @@ export const shops = pgTable(
     igUserId: text().unique(),
     igUsername: text(),
     igAccessToken: text(),
+    /** long-lived Instagram tokens last 60 days; a daily job refreshes them before this */
+    igTokenExpiresAt: timestamp({ withTimezone: true }),
+    /** WooCommerce REST API (read-only key is enough for import) */
+    wooUrl: text(),
+    wooConsumerKey: text(),
+    wooConsumerSecret: text(),
     telegramChatId: text(),
     /** merchant Sheba (IR...) that receives the shop's share when split payments go live */
     settlementIban: text(),
@@ -287,6 +307,8 @@ export const productVariants = pgTable(
     compareAtPrice: money(),
     /** optional USD price in cents; when the shop enables USD pricing, `price` is derived from it */
     priceUsdCents: integer(),
+    /** weighted-average purchase cost, updated by goods receipts */
+    costPrice: money(),
     stock: integer().notNull().default(0),
     reserved: integer().notNull().default(0),
     lowStockThreshold: integer().notNull().default(3),
@@ -322,6 +344,76 @@ export const inventoryMovements = pgTable(
   (t) => [index().on(t.variantId, t.createdAt), index().on(t.shopId, t.createdAt)],
 );
 
+/** Goods received from a supplier: raises stock and the weighted-average cost of each variant. */
+export const stockReceipts = pgTable(
+  "stock_receipts",
+  {
+    id: id(),
+    shopId: shopRef(),
+    code: text().notNull(),
+    supplier: text().notNull().default(""),
+    note: text(),
+    receivedAt: timestamp({ withTimezone: true }).notNull(),
+    total: money().notNull(),
+    createdBy: uuid(),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex().on(t.shopId, t.code), index().on(t.shopId, t.receivedAt)],
+);
+
+export const stockReceiptItems = pgTable(
+  "stock_receipt_items",
+  {
+    id: id(),
+    receiptId: uuid()
+      .notNull()
+      .references(() => stockReceipts.id, { onDelete: "cascade" }),
+    variantId: uuid()
+      .notNull()
+      .references(() => productVariants.id, { onDelete: "restrict" }),
+    quantity: integer().notNull(),
+    unitCost: money().notNull(),
+  },
+  (t) => [index().on(t.receiptId), check("receipt_qty_positive", sql`${t.quantity} > 0`), check("receipt_cost_non_negative", sql`${t.unitCost} >= 0`)],
+);
+
+/** One WooCommerce catalog import run: progress and per-product errors for the panel. */
+export const wooImports = pgTable(
+  "woo_imports",
+  {
+    id: id(),
+    shopId: shopRef(),
+    status: text().notNull().default("queued"), // queued | running | done | failed
+    total: integer().notNull().default(0),
+    created: integer().notNull().default(0),
+    updated: integer().notNull().default(0),
+    skipped: integer().notNull().default(0),
+    errors: jsonb().$type<{ product: string; error: string }[]>().notNull().default([]),
+    options: jsonb().$type<{ unit: "toman" | "rial"; defaultStock: number; status: "active" | "draft" }>().notNull(),
+    createdBy: uuid(),
+    startedAt: timestamp({ withTimezone: true }),
+    finishedAt: timestamp({ withTimezone: true }),
+    createdAt: createdAt(),
+  },
+  (t) => [index().on(t.shopId, t.createdAt)],
+);
+
+/** Operating costs entered by the shop (rent, salaries, materials, ...), for the profit report. */
+export const expenses = pgTable(
+  "expenses",
+  {
+    id: id(),
+    shopId: shopRef(),
+    category: text().notNull(),
+    amount: money().notNull(),
+    spentAt: timestamp({ withTimezone: true }).notNull(),
+    note: text(),
+    createdBy: uuid(),
+    createdAt: createdAt(),
+  },
+  (t) => [index().on(t.shopId, t.spentAt), check("expense_positive", sql`${t.amount} > 0`)],
+);
+
 // ---------------------------------------------------------------- customers & club
 export interface Address {
   fullName: string;
@@ -354,6 +446,8 @@ export const customers = pgTable(
     noShowCount: integer().notNull().default(0),
     lastVisitAt: timestamp({ withTimezone: true }),
     points: integer().notNull().default(0),
+    /** store credit held by this shop (refunds), spendable on its bookings and orders */
+    walletBalance: money().notNull().default(0),
     segment: customerSegment().notNull().default("new"),
     smsOptOut: boolean().notNull().default(false),
     createdAt: createdAt(),
@@ -364,7 +458,27 @@ export const customers = pgTable(
     uniqueIndex().on(t.shopId, t.instagramId),
     index().on(t.shopId, t.segment),
     index().on(t.shopId, t.lastOrderAt),
+    check("customer_wallet_non_negative", sql`${t.walletBalance} >= 0`),
   ],
+);
+
+export const customerWalletTx = pgTable(
+  "customer_wallet_tx",
+  {
+    id: id(),
+    shopId: shopRef(),
+    customerId: uuid()
+      .notNull()
+      .references(() => customers.id, { onDelete: "cascade" }),
+    amount: money().notNull(),
+    balanceAfter: money().notNull(),
+    reason: text().notNull(), // refund | payment | adjust
+    refType: text(),
+    refId: text(),
+    note: text(),
+    createdAt: createdAt(),
+  },
+  (t) => [index().on(t.customerId, t.createdAt), index().on(t.shopId, t.createdAt)],
 );
 
 export const loyaltyLedger = pgTable(
@@ -474,6 +588,8 @@ export const orderItems = pgTable(
     unitPrice: money().notNull(),
     quantity: integer().notNull(),
     total: money().notNull(),
+    /** variant cost at the moment of payment, for cost of goods sold */
+    unitCost: money(),
   },
   (t) => [index().on(t.orderId), index().on(t.productId)],
 );
@@ -500,6 +616,12 @@ export interface DepositRule {
   value: number;
 }
 
+export interface BeforeAfter {
+  before: string;
+  after: string;
+  caption?: string;
+}
+
 export const services = pgTable(
   "services",
   {
@@ -518,7 +640,12 @@ export const services = pgTable(
     onlineBookable: boolean().notNull().default(true),
     requiresApproval: boolean().notNull().default(false),
     color: text().notNull().default("#aebbd0"),
+    /** square avatar shown on service cards */
     image: text(),
+    /** wide cover shown at the top of the service page */
+    banner: text(),
+    gallery: jsonb().$type<string[]>().notNull().default([]),
+    beforeAfter: jsonb().$type<BeforeAfter[]>().notNull().default([]),
     active: boolean().notNull().default(true),
     sort: integer().notNull().default(0),
     createdAt: createdAt(),
@@ -708,6 +835,10 @@ export const conversations = pgTable(
     unread: integer().notNull().default(0),
     lastMessageAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
     lastInboundAt: timestamp({ withTimezone: true }),
+    /** visits to the shop's site from links sent in this chat (utm_source=shopino_dm) */
+    siteVisits: integer().notNull().default(0),
+    lastSiteVisitAt: timestamp({ withTimezone: true }),
+    lastSitePath: text(),
     createdAt: createdAt(),
   },
   (t) => [uniqueIndex().on(t.shopId, t.channel, t.externalUserId), index().on(t.shopId, t.lastMessageAt)],

@@ -7,6 +7,7 @@ import { Button, ErrorNote } from "@/components/ui";
 import { api } from "@/lib/api";
 import { money, num } from "@/lib/format";
 import { useI18n } from "@/lib/locale-client";
+import { getDmRef } from "@/components/dm-ref";
 
 export interface CartLine {
   variantId: string;
@@ -95,7 +96,7 @@ function CartDrawer({ slug }: { slug: string }) {
     try {
       const r = await api<{ code: string; token: string }>(`/public/shops/${slug}/orders`, {
         method: "POST",
-        json: { items: lines.map((l) => ({ variantId: l.variantId, quantity: l.quantity })) },
+        json: { items: lines.map((l) => ({ variantId: l.variantId, quantity: l.quantity })), ref: getDmRef() },
       });
       localStorage.removeItem(`cart:${slug}`);
       router.push(`/o/${r.code}?t=${r.token}`);

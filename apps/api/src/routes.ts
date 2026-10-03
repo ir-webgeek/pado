@@ -12,11 +12,15 @@ import { customerRoutes } from "./modules/customers/routes";
 import { discountRoutes } from "./modules/discounts/routes";
 import { inboxRoutes } from "./modules/inbox/routes";
 import { instagramWebhook } from "./modules/instagram/webhook";
+import { instagramOAuthCallbackRoutes, instagramOAuthStartRoutes } from "./modules/instagram/oauth-routes";
+import { inventoryRoutes } from "./modules/inventory/routes";
+import { financeRoutes } from "./modules/finance/routes";
 import { orderRoutes } from "./modules/orders/routes";
 import { reportRoutes } from "./modules/reports/routes";
 import { shopRoutes } from "./modules/shops/routes";
 import { payCallbackRoutes, storefrontRoutes } from "./modules/storefront/routes";
 import { walletRoutes } from "./modules/wallet/routes";
+import { woocommerceRoutes } from "./modules/woocommerce/routes";
 import { adminRoutes } from "./modules/admin/routes";
 import { automationRoutes } from "./modules/automations/routes";
 import { customerRoutes as customerPortalRoutes } from "./modules/customer/routes";
@@ -42,6 +46,7 @@ export const routes =
     for (const r of [
       shopRoutes,
       catalogRoutes,
+      inventoryRoutes,
       orderRoutes,
       customerRoutes,
       discountRoutes,
@@ -50,12 +55,15 @@ export const routes =
       walletRoutes,
       campaignRoutes,
       reportRoutes,
+      financeRoutes,
       uploadRoutes,
       pricingRoutes,
       automationRoutes,
       formRoutes,
       knowledgeRoutes,
       instagramImportRoutes,
+      woocommerceRoutes,
+      instagramOAuthStartRoutes,
       landingRoutes,
     ]) {
       await app.register(r(ctx), { prefix: "/shops" });
@@ -66,4 +74,5 @@ export const routes =
     await app.register(adminRoutes(ctx), { prefix: "/admin" });
     await app.register(payCallbackRoutes(ctx), { prefix: "/pay" });
     await app.register(instagramWebhook(ctx), { prefix: "/webhooks" });
+    await app.register(instagramOAuthCallbackRoutes(ctx), { prefix: "/instagram" });
   };

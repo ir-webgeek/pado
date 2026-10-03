@@ -3,11 +3,12 @@
 import { Loader2, Upload } from "lucide-react";
 import { useRef, useState } from "react";
 import { api } from "@/lib/api";
-import { useShop } from "@/lib/shop";
+import { useShopMaybe } from "@/lib/shop";
 
-/** Uploads a file to the shop's storage and returns its public URL. */
-export function UploadButton({ onUploaded, accept = "image/*", label }: { onUploaded: (url: string) => void; accept?: string; label: string }) {
-  const { shop } = useShop();
+/** Uploads a file to the shop's storage and returns its public URL. Outside the panel pass `shopId`. */
+export function UploadButton({ onUploaded, accept = "image/*", label, shopId }: { onUploaded: (url: string) => void; accept?: string; label: string; shopId?: string }) {
+  const ctx = useShopMaybe();
+  const id = shopId ?? ctx?.shop.id;
   const input = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -34,7 +35,7 @@ export function UploadButton({ onUploaded, accept = "image/*", label }: { onUplo
           try {
             const fd = new FormData();
             fd.append("file", file);
-            const r = await api<{ url: string }>(`/shops/${shop.id}/uploads`, { method: "POST", body: fd });
+            const r = await api<{ url: string }>(`/shops/${id}/uploads`, { method: "POST", body: fd });
             onUploaded(r.url);
           } catch (err) {
             setError((err as Error).message);

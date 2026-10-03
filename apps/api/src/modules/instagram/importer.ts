@@ -104,14 +104,15 @@ export async function analyzeMedia(db: Database, shopId: string, rowIds: string[
 }
 
 /** Instagram CDN links expire - copy images into our own storage before using them on products. */
-async function copyImage(url: string, shopId: string): Promise<string | null> {
+/** Copy a remote image into the shop's storage (SSRF-guarded, images only, no redirects). */
+export async function copyImage(url: string, shopId: string, folder = "ig"): Promise<string | null> {
   try {
     await assertPublicHttpsUrl(url);
     const res = await fetch(url, { signal: AbortSignal.timeout(20_000), redirect: "error" });
     const type = res.headers.get("content-type") ?? "";
     if (!res.ok || !type.startsWith("image/")) return null;
     const ext = type.includes("png") ? ".png" : type.includes("webp") ? ".webp" : ".jpg";
-    const rel = join("shops", shopId, "ig");
+    const rel = join("shops", shopId, folder);
     const dir = resolve(env.UPLOAD_DIR, rel);
     await mkdir(dir, { recursive: true });
     const name = `${randomBytes(10).toString("hex")}${ext}`;

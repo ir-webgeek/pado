@@ -7,9 +7,9 @@ export function PanelPreview({ t, locale }: { t: (k: DictKey) => string; locale:
   const n = (v: number) => new Intl.NumberFormat(locale === "fa" ? "fa-IR" : "en-US").format(v);
   const bars = [32, 44, 38, 60, 52, 88, 100];
   const appts = [
-    { time: "10:00", who: locale === "fa" ? "الهام · کوتاهی" : "Elham · Haircut", c: "#d9d0b8", col: 0, h: 2 },
-    { time: "11:00", who: locale === "fa" ? "سارا · رنگ مو" : "Sara · Color", c: "#c4b894", col: 1, h: 3 },
-    { time: "12:30", who: locale === "fa" ? "نگار · مانیکور" : "Negar · Manicure", c: "#aebbd0", col: 2, h: 1 },
+    { time: "10:00", who: locale === "fa" ? "الهام · کوتاهی" : "Elham · Haircut", c: "#3ddbc4", col: 0, h: 2 },
+    { time: "11:00", who: locale === "fa" ? "سارا · رنگ مو" : "Sara · Color", c: "#b3a8f0", col: 1, h: 3 },
+    { time: "12:30", who: locale === "fa" ? "نگار · مانیکور" : "Negar · Manicure", c: "#f4b88a", col: 2, h: 1 },
     { time: "13:00", who: locale === "fa" ? "کارگاه میکاپ ۶/۸" : "Makeup class 6/8", c: "#52b4fd", col: 0, h: 2 },
   ];
   return (

@@ -1,28 +1,43 @@
 "use client";
 
-import { Languages, Moon, Sun } from "lucide-react";
+import { Languages, Monitor, Moon, Sun } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useI18n } from "@/lib/locale-client";
 
+type ThemePref = "system" | "day" | "night";
+const NEXT: Record<ThemePref, ThemePref> = { system: "day", day: "night", night: "system" };
+const ICON = { system: Monitor, day: Sun, night: Moon };
+
+declare global {
+  interface Window {
+    __applyTheme?: () => void;
+  }
+}
+
+/** Cycles system -> light -> dark. "system" follows the OS (applied by the inline script in the root layout). */
 export function ThemeToggle() {
-  const [theme, setTheme] = useState<"night" | "day">("night");
+  const { t } = useI18n();
+  const [pref, setPref] = useState<ThemePref>("system");
   useEffect(() => {
     try {
       const saved = localStorage.getItem("theme");
-      if (saved === "day" || saved === "night") setTheme(saved);
+      if (saved === "day" || saved === "night") setPref(saved);
     } catch {}
   }, []);
-  const toggle = () => {
-    const next = theme === "night" ? "day" : "night";
-    setTheme(next);
-    document.documentElement.dataset.theme = next;
+  const cycle = () => {
+    const next = NEXT[pref];
+    setPref(next);
     try {
-      localStorage.setItem("theme", next);
+      if (next === "system") localStorage.removeItem("theme");
+      else localStorage.setItem("theme", next);
     } catch {}
+    window.__applyTheme?.();
   };
+  const Icon = ICON[pref];
+  const label = t(`theme.${pref}`);
   return (
-    <button onClick={toggle} className="rounded-full p-2 hover:bg-[var(--surface-sunken)]" aria-label="theme">
-      {theme === "night" ? <Sun className="size-4" /> : <Moon className="size-4" />}
+    <button onClick={cycle} className="rounded-full p-2 hover:bg-[var(--surface-sunken)]" aria-label={label} title={label}>
+      <Icon className="size-4" />
     </button>
   );
 }
