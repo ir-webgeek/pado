@@ -111,6 +111,7 @@ const fa = {
 
   "cta.final.t": "فروش و نوبت‌هات رو بسپر به شاپینو",
   "cta.final.s": "دموی رایگان با محصولات و خدمات خودت؛ راه‌اندازی زیر ده دقیقه.",
+  "footer.trust": "نماد اعتماد الکترونیکی",
   "footer.rights": "همه‌ی حقوق محفوظ است.",
 
   // auth
@@ -976,6 +977,7 @@ const fa = {
   "ad.cfg.shipping": "ارسال (پستکس، تیپاکس)",
   "ad.cfg.notify": "اعلان‌ها",
   "ad.cfg.sms": "پیامک (کاوه‌نگار)",
+  "ad.cfg.site": "اینماد و متاهای سایت",
   "ad.src.panel": "از پنل",
   "ad.src.env": "از سرور",
   "ad.src.unset": "تنظیم نشده",
@@ -1110,6 +1112,7 @@ const en: Record<DictKey, string> = {
   "faq.a5": "It uses Meta's official API, not an unofficial bot. Replies are sent from our servers - no VPN, your phone can be off.",
   "cta.final.t": "Hand your sales and bookings to Shopino",
   "cta.final.s": "A free demo with your own products and services. Set up in under ten minutes.",
+  "footer.trust": "Electronic trust seal",
   "footer.rights": "All rights reserved.",
   "auth.title": "Log in or sign up",
   "auth.phone": "Mobile number",
@@ -1946,6 +1949,7 @@ const en: Record<DictKey, string> = {
   "ad.cfg.shipping": "Shipping (Postex, Tipax)",
   "ad.cfg.notify": "Notifications",
   "ad.cfg.sms": "SMS (Kavenegar)",
+  "ad.cfg.site": "eNamad and site meta tags",
   "ad.src.panel": "panel",
   "ad.src.env": "server env",
   "ad.src.unset": "not set",

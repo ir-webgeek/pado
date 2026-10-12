@@ -11,6 +11,40 @@ export async function publicGet<T>(path: string, revalidate = 30): Promise<T | n
   }
 }
 
+export interface SiteConfig {
+  enamadMeta: string | null;
+  enamadHtml: string | null;
+  badgeUrl: string | null;
+  badgeImage: string | null;
+  headHtml: string | null;
+}
+
+/** Trust seal / verification settings from the platform admin (cached a few minutes). */
+export async function siteConfig(): Promise<SiteConfig | null> {
+  try {
+    const res = await fetch(`${base}/v1/platform/site`, { next: { revalidate: 30 } });
+    return res.ok ? ((await res.json()) as SiteConfig) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Only <meta> and <link> tags from the admin's extra head HTML (no scripts or markup). */
+export function headTags(html: string | null): { tag: "meta" | "link"; attrs: Record<string, string> }[] {
+  if (!html) return [];
+  const out: { tag: "meta" | "link"; attrs: Record<string, string> }[] = [];
+  for (const m of html.matchAll(/<(meta|link)\s+([^>]*?)\/?>/gi)) {
+    const attrs: Record<string, string> = {};
+    for (const a of m[2]!.matchAll(/([a-zA-Z:-]+)\s*=\s*(?:"([^"]*)"|'([^']*)')/g)) {
+      const name = a[1]!.toLowerCase();
+      if (name.startsWith("on")) continue;
+      attrs[name] = a[2] ?? a[3] ?? "";
+    }
+    if (Object.keys(attrs).length) out.push({ tag: m[1]!.toLowerCase() as "meta" | "link", attrs });
+  }
+  return out.slice(0, 20);
+}
+
 export interface PublicShop {
   shop: {
     id: string;

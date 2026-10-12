@@ -52,6 +52,17 @@ export const routes =
       reply.header("cache-control", "public, max-age=60");
       return { plans: PLAN_IDS.map((id) => PLANS[id]) };
     });
+    // site-wide trust seal and verification tags (eNamad etc.) for the public pages
+    app.get("/platform/site", async (_req, reply) => {
+      reply.header("cache-control", "public, max-age=60");
+      return {
+        enamadMeta: cfg("ENAMAD_META") ?? null,
+        enamadHtml: cfg("ENAMAD_HTML") ?? null,
+        badgeUrl: cfg("TRUST_BADGE_URL") ?? null,
+        badgeImage: cfg("TRUST_BADGE_IMAGE") ?? null,
+        headHtml: cfg("SITE_HEAD_HTML") ?? null,
+      };
+    });
     app.get("/platform/status", async () => {
       const gateway = cfg("PAYMENT_PROVIDER") ?? env.PAYMENT_PROVIDER;
       return { gateway, demoGateway: gateway === "mock", ai: aiAvailable(), instagramOAuth: instagramOAuthConfigured() };

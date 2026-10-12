@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Logo } from "@/components/logo";
 import type { DictKey } from "@/lib/i18n";
+import { TrustBadge } from "./trust-badge";
 
 export function SiteFooter({ t }: { t: (k: DictKey) => string }) {
   return (
@@ -15,6 +16,7 @@ export function SiteFooter({ t }: { t: (k: DictKey) => string }) {
           <Link href="/#faq">{t("nav.faq")}</Link>
           <Link href="/login">{t("nav.panel")}</Link>
         </div>
+        <TrustBadge label={t("footer.trust")} />
         <p className="text-xs muted">© {new Date().getFullYear()} {t("brand.name")}. {t("footer.rights")}</p>
       </div>
     </footer>

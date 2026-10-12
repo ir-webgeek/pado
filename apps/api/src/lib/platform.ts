@@ -11,7 +11,7 @@ import { env } from "../config";
  */
 export interface SettingDef {
   key: string;
-  group: "ai" | "meta" | "payment" | "shipping" | "notify" | "sms";
+  group: "ai" | "meta" | "payment" | "shipping" | "notify" | "sms" | "site";
   label: { fa: string; en: string };
   secret?: boolean;
   /** allowed values for a select */
@@ -69,6 +69,22 @@ export const SETTINGS: SettingDef[] = [
     hint: { fa: "نام قالب تاییدشده در پنل کاوه‌نگار؛ کدهای ورود با این قالب ارسال می‌شوند.", en: "Approved template name in Kavenegar; login codes are sent with it." },
   },
   { key: "KAVENEGAR_BASE_URL", group: "sms", label: { fa: "آدرس API کاوه‌نگار", en: "Kavenegar API address" }, kind: "url", hint: { fa: "پیش‌فرض: https://api.kavenegar.com", en: "Default: https://api.kavenegar.com" } },
+  {
+    key: "ENAMAD_META",
+    group: "site",
+    label: { fa: "کد متای اینماد", en: "eNamad meta code" },
+    hint: { fa: "مقدار content تگ <meta name=\"enamad\"> که اینماد برای تایید دامنه می‌دهد.", en: "The content of the <meta name=\"enamad\"> tag eNamad gives for domain verification." },
+  },
+  {
+    key: "ENAMAD_HTML",
+    group: "site",
+    label: { fa: "کد HTML نماد اعتماد", en: "Trust seal HTML" },
+    kind: "multiline",
+    hint: { fa: "کد نشانی که اینماد می‌دهد؛ در فوتر سایت نمایش داده می‌شود. تا وقتی خالی است، نشان پیش‌فرض با لینک زیر نمایش داده می‌شود.", en: "The badge code eNamad gives; shown in the site footer. Until set, the default badge with the link below is shown." },
+  },
+  { key: "TRUST_BADGE_URL", group: "site", label: { fa: "لینک نشان اعتماد", en: "Trust badge link" }, kind: "url" },
+  { key: "TRUST_BADGE_IMAGE", group: "site", label: { fa: "تصویر نشان (اختیاری)", en: "Badge image (optional)" }, kind: "url", hint: { fa: "خالی = نشان طراحی‌شده خود سایت.", en: "Empty = the site's own badge." } },
+  { key: "SITE_HEAD_HTML", group: "site", label: { fa: "کد اضافه در head (متاهای سفارشی)", en: "Extra head HTML (custom meta tags)" }, kind: "multiline", hint: { fa: "فقط تگ‌های meta و link پذیرفته می‌شوند.", en: "Only meta and link tags are accepted." } },
   { key: "TELEGRAM_BOT_TOKEN", group: "notify", label: { fa: "توکن ربات تلگرام", en: "Telegram bot token" }, secret: true },
 ];
 const DEFS = new Map(SETTINGS.map((d) => [d.key, d]));

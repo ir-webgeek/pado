@@ -5,13 +5,16 @@ import { DmRefTracker } from "@/components/dm-ref";
 import { PwaSetup } from "@/components/pwa";
 import { LocaleProvider } from "@/lib/locale-client";
 import { getT } from "@/lib/locale-server";
+import { headTags, siteConfig } from "@/lib/server-api";
 import "./globals.css";
 
 const vazirmatn = localFont({ src: "./Vazirmatn.woff2", variable: "--font-vazirmatn", display: "swap", weight: "100 900" });
 
 export async function generateMetadata(): Promise<Metadata> {
   const { t } = await getT();
+  const site = await siteConfig();
   return {
+    other: site?.enamadMeta ? { enamad: site.enamadMeta } : undefined,
     title: { default: `${t("brand.name")} | ${t("brand.tagline")}`, template: `%s | ${t("brand.name")}` },
     description: t("hero.sub"),
     applicationName: t("brand.name"),
@@ -35,10 +38,12 @@ const themeScript = `document.documentElement.classList.add("js");try{var d=docu
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   const { locale } = await getT();
+  const extraHead = headTags((await siteConfig())?.headHtml ?? null);
   return (
     <html lang={locale} dir={dirOf(locale)} className={vazirmatn.variable} suppressHydrationWarning>
       <head>
         <script dangerouslySetInnerHTML={{ __html: themeScript }} />
+        {extraHead.map((h, i) => (h.tag === "meta" ? <meta key={i} {...h.attrs} /> : <link key={i} {...h.attrs} />))}
       </head>
       <body className="font-sans">
         <LocaleProvider locale={locale}>{children}</LocaleProvider>
