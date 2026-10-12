@@ -4,7 +4,7 @@ import clsx from "clsx";
 import { CalendarDays, ChevronLeft, ChevronRight } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { zonedIsoDate } from "@shopino/shared";
-import { WEEK_HEAD, faDigits, monthOf } from "@/lib/calendar";
+import { ShamsiCalendar } from "@/components/farsi/calendar";
 import { date as fmtDate } from "@/lib/format";
 import { useI18n } from "@/lib/locale-client";
 
@@ -24,7 +24,7 @@ export function MonthNav({ label, onPrev, onNext }: { label: string; onPrev: () 
   );
 }
 
-/** Saturday-first month grid. `renderDay` adds content under the day number (e.g. booking counts). */
+/** Saturday-first month grid (FarsiUI Shamsi calendar). `renderDay` adds content under the day number (e.g. booking counts). */
 export function MonthGrid({
   anchor,
   selected,
@@ -45,42 +45,20 @@ export function MonthGrid({
   cellClassName?: string;
 }) {
   const { locale } = useI18n();
-  const m = monthOf(anchor, locale);
   return (
-    <div className="grid grid-cols-7 gap-1 text-center">
-      {WEEK_HEAD[locale].map((w, i) => (
-        <span key={w} className={clsx("py-1 text-[11px] font-medium muted", i === 6 && "text-danger/80")}>
-          {w}
-        </span>
-      ))}
-      {Array.from({ length: m.lead }, (_, i) => (
-        <span key={`b${i}`} />
-      ))}
-      {m.days.map((d, i) => {
-        const disabled = (min && d < min) || (max && d > max);
-        const isSel = d === selected;
-        // Friday is the weekend day in Iran
-        const friday = (m.lead + i) % 7 === 6;
-        return (
-          <button
-            key={d}
-            type="button"
-            disabled={Boolean(disabled)}
-            onClick={() => onPick(d)}
-            className={clsx(
-              "num flex flex-col items-center rounded-xl text-sm transition disabled:pointer-events-none disabled:opacity-30",
-              isSel ? "bg-[var(--accent)] font-semibold text-[var(--accent-ink)]" : "hover:bg-[var(--accent-soft)]",
-              !isSel && d === today && "ring-1 ring-gold/60",
-              !isSel && friday && "text-danger/80",
-              cellClassName ?? "h-9 justify-center",
-            )}
-          >
-            <span>{locale === "fa" ? faDigits(i + 1) : i + 1}</span>
-            {renderDay?.(d)}
-          </button>
-        );
-      })}
-    </div>
+    <ShamsiCalendar
+      locale={locale}
+      month={anchor}
+      onMonthChange={() => undefined}
+      selected={selected}
+      today={today}
+      min={min}
+      max={max}
+      onPick={onPick}
+      renderDay={renderDay}
+      size={cellClassName?.includes("h-") && !cellClassName.includes("h-9") ? "lg" : "sm"}
+      hideHeader
+    />
   );
 }
 
@@ -124,7 +102,6 @@ export function DatePicker({
     };
   }, [open, value]);
 
-  const m = monthOf(anchor, locale);
   const pick = (d: string) => {
     onChange(d);
     setOpen(false);
@@ -141,10 +118,7 @@ export function DatePicker({
       </button>
       {open && (
         <div role="dialog" className="absolute start-0 top-full z-50 mt-2 w-72 rounded-2xl border border-[var(--border)] bg-[var(--bg-elev)] p-3 shadow-2xl animate-rise">
-          <MonthNav label={m.label} onPrev={() => setAnchor(m.prev)} onNext={() => setAnchor(m.next)} />
-          <div className="mt-2">
-            <MonthGrid anchor={anchor} selected={value} today={today} min={min} max={max} onPick={pick} />
-          </div>
+          <ShamsiCalendar locale={locale} month={anchor} onMonthChange={setAnchor} selected={value} today={today} min={min} max={max} onPick={pick} />
           <div className="mt-2 flex justify-between border-t border-[var(--border)] pt-2">
             <button type="button" className="rounded-full px-3 py-1 text-xs strong hover:bg-[var(--surface-sunken)]" onClick={() => pick(today)} disabled={Boolean((min && today < min) || (max && today > max))}>
               {t("a.today")}
