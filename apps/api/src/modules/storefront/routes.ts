@@ -429,7 +429,8 @@ export const storefrontRoutes =
           durationMin: s.durationMin,
           price: s.price,
           priceFrom: s.priceFrom,
-          deposit: s.deposit,
+          // deposits are only taken on plans that include them
+          deposit: planHas(shop.plan, "appointment_deposits") ? s.deposit : { type: "none" as const, value: 0 },
           capacity: s.capacity,
           color: s.color,
           image: s.image,

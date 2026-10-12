@@ -26,7 +26,8 @@ interface Conversation {
   lastText: string | null;
 }
 type Status = "open" | "needs_human" | "in_progress" | "resolved";
-type Filter = "all" | "needs_human" | "mine" | "in_progress" | "open" | "resolved" | "unread";
+const INBOX_FILTERS = ["all", "needs_human", "mine", "in_progress", "open", "resolved", "unread"] as const;
+type Filter = (typeof INBOX_FILTERS)[number];
 interface Summary {
   counts: { open: number; needsHuman: number; inProgress: number; resolved: number; mine: number; unread: number; oldestWaiting: string | null };
   team: { userId: string; name: string | null; role: string }[];
@@ -63,6 +64,11 @@ export default function InboxPage() {
   const { shop } = useShop();
   const [filter, setFilter] = useState<Filter | "playground">("all");
   const [active, setActive] = useState<string | null>(null);
+  // deep links from the dashboard, e.g. ?filter=needs_human
+  useEffect(() => {
+    const wanted = new URLSearchParams(window.location.search).get("filter");
+    if (wanted && INBOX_FILTERS.includes(wanted as Filter)) setFilter(wanted as Filter);
+  }, []);
   const { data: convs, mutate } = useApi<Conversation[]>(filter === "playground" ? null : `/shops/${shop.id}/conversations?filter=${filter}`, { refreshInterval: 10_000 });
   const { data: summary, mutate: reloadSummary } = useApi<Summary>(`/shops/${shop.id}/conversations/summary`, { refreshInterval: 15_000 });
   const counts = summary?.counts;

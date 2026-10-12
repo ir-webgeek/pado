@@ -66,11 +66,14 @@ export function Assistant({
   serviceId,
   mode = "shop",
   page,
+  raised,
 }: {
   slug: string;
   serviceId?: string;
   mode?: "shop" | "booking";
   page?: "order" | "booking" | "form" | "landing";
+  /** lift the launcher above a sticky bottom bar */
+  raised?: boolean;
 }) {
   const { t, locale } = useI18n();
   const pathname = usePathname();
@@ -140,7 +143,7 @@ export function Assistant({
   return (
     <>
       {!open && (
-        <div className="fixed bottom-5 end-5 z-40 flex flex-col items-end gap-2">
+        <div className={clsx("fixed end-5 z-40 flex flex-col items-end gap-2 transition-[bottom]", raised ? "bottom-24" : "bottom-5")}>
           {teaser && lastDm && (
             <button
               onClick={openChat}

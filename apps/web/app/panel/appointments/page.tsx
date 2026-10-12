@@ -1,8 +1,8 @@
 "use client";
 
 import clsx from "clsx";
-import { CalendarOff, ChevronLeft, ChevronRight, Plus, UserPlus } from "lucide-react";
-import { useMemo, useState } from "react";
+import { CalendarOff, ChevronLeft, ChevronRight, MoreHorizontal, Phone, Plus, UserPlus } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 import { addDaysIso, weekdayOfIso, zonedIsoDate, zonedToUtc } from "@shopino/shared";
 import { DatePicker, MonthGrid, MonthNav } from "@/components/date-picker";
 import { Badge, Button, Card, ErrorNote, Field, Input, Modal, PageHeader, Select, Spinner, Tabs, Textarea, Toggle, statusTone } from "@/components/ui";
@@ -15,6 +15,10 @@ import { useShop } from "@/lib/shop";
 import type { Appointment, DaySlots, Service, Staff } from "@/lib/types";
 
 const PX_PER_MIN = 1.1;
+const VIEWS = ["agenda", "day", "week", "month"] as const;
+type View = (typeof VIEWS)[number];
+const VIEW_KEY = "appointments-view";
+const AGENDA_FILTERS = ["all", "pending", "confirmed", "checked_in", "completed", "missed"] as const;
 
 function useShopTz() {
   const { shop } = useShop();
@@ -26,7 +30,26 @@ export default function AppointmentsPage() {
   const { t, locale } = useI18n();
   const { shop } = useShop();
   const tz = useShopTz();
-  const [view, setView] = useState<"day" | "week" | "month">("day");
+  const [view, setViewState] = useState<View>("day");
+  // remembered per browser; phones start on the list, where a staff grid is too narrow
+  useEffect(() => {
+    let saved: string | null = null;
+    try {
+      saved = localStorage.getItem(VIEW_KEY);
+    } catch {
+      // storage unavailable
+    }
+    if (saved && (VIEWS as readonly string[]).includes(saved)) setViewState(saved as View);
+    else if (window.matchMedia("(max-width: 640px)").matches) setViewState("agenda");
+  }, []);
+  const setView = (v: View) => {
+    setViewState(v);
+    try {
+      localStorage.setItem(VIEW_KEY, v);
+    } catch {
+      // not remembered
+    }
+  };
   const [date, setDate] = useState(() => zonedIsoDate(new Date(), tz));
   const [selected, setSelected] = useState<Appointment | null>(null);
   const [creating, setCreating] = useState<{ staffId?: string; startsAt?: string } | null>(null);
@@ -34,9 +57,9 @@ export default function AppointmentsPage() {
   const [walkIn, setWalkIn] = useState(false);
 
   const month = monthOf(date, locale);
-  const days = view === "day" ? 1 : view === "week" ? 7 : month.length;
-  // week view starts on Saturday (Iranian week)
-  const start = view === "day" ? date : view === "week" ? addDaysIso(date, -((weekdayOfIso(date) + 1) % 7)) : month.first;
+  const days = view === "day" ? 1 : view === "week" || view === "agenda" ? 7 : month.length;
+  // week view starts on Saturday (Iranian week); the list runs a week from the picked day
+  const start = view === "day" || view === "agenda" ? date : view === "week" ? addDaysIso(date, -((weekdayOfIso(date) + 1) % 7)) : month.first;
   const from = zonedToUtc(start, 0, tz).toISOString();
   const to = zonedToUtc(addDaysIso(start, days), 0, tz).toISOString();
 
@@ -50,7 +73,8 @@ export default function AppointmentsPage() {
   const { data: refunds, mutate: reloadRefunds } = useApi<Appointment[]>(`/shops/${shop.id}/appointments/refunds`);
   const activeStaff = (staff ?? []).filter((s) => s.active);
   const shift = (n: number) => (view === "month" ? setDate(n < 0 ? month.prev : month.next) : setDate((d) => addDaysIso(d, n * days)));
-  const subtitle = view === "day" ? dayLabel(date, locale) : view === "week" ? `${dayLabel(start, locale)} - ${dayLabel(addDaysIso(start, 6), locale)}` : month.label;
+  const subtitle = view === "day" ? dayLabel(date, locale) : view === "week" || view === "agenda" ? `${dayLabel(start, locale)} - ${dayLabel(addDaysIso(start, 6), locale)}` : month.label;
+  const pending = (cal?.appointments ?? []).filter((a) => a.status === "pending").length;
 
   return (
     <div>
@@ -59,11 +83,11 @@ export default function AppointmentsPage() {
         subtitle={subtitle}
         actions={
           <>
-            <Button onClick={() => setWalkIn(true)}>
-              <UserPlus className="size-4" /> {t("ap.walkIn")}
+            <Button onClick={() => setWalkIn(true)} aria-label={t("ap.walkIn")} title={t("ap.walkIn")}>
+              <UserPlus className="size-4" /> <span className="hidden sm:inline">{t("ap.walkIn")}</span>
             </Button>
-            <Button onClick={() => setTimeOffOpen(true)}>
-              <CalendarOff className="size-4" /> {t("ap.timeOff")}
+            <Button onClick={() => setTimeOffOpen(true)} aria-label={t("ap.timeOff")} title={t("ap.timeOff")}>
+              <CalendarOff className="size-4" /> <span className="hidden sm:inline">{t("ap.timeOff")}</span>
             </Button>
             <Button variant="primary" onClick={() => setCreating({})}>
               <Plus className="size-4" /> {t("p.newBooking")}
@@ -87,6 +111,7 @@ export default function AppointmentsPage() {
           value={view}
           onChange={setView}
           items={[
+            { value: "agenda", label: t("ap.agenda") },
             { value: "day", label: t("ap.day") },
             { value: "week", label: t("ap.week") },
             { value: "month", label: t("ap.month") },
@@ -108,8 +133,19 @@ export default function AppointmentsPage() {
           ))}
         </Card>
       )}
+      {pending > 0 && view !== "agenda" && (
+        <button
+          onClick={() => setView("agenda")}
+          className="mb-4 flex w-full items-center justify-between gap-2 rounded-2xl border border-warning/40 bg-warning/10 px-4 py-2.5 text-start text-sm"
+        >
+          <span className="text-warning">{t("ap.toConfirm").replace("{n}", num(pending, locale))}</span>
+          <span className="text-xs strong">{t("ap.review")}</span>
+        </button>
+      )}
       {!cal || !staff ? (
         <Spinner />
+      ) : view === "agenda" ? (
+        <AgendaView start={start} tz={tz} appointments={cal.appointments} onSelect={setSelected} onChanged={() => mutate()} />
       ) : view === "day" ? (
         <DayGrid
           date={date}
@@ -399,6 +435,100 @@ const APPT_ACTIONS: Record<string, { to: string; label: DictKey; variant?: "prim
     { to: "no_show", label: "a.noShow" },
   ],
 };
+
+/** A week as a list grouped by day: easy on phones, with the next step one tap away. */
+function AgendaView({ start, tz, appointments, onSelect, onChanged }: { start: string; tz: string; appointments: Appointment[]; onSelect: (a: Appointment) => void; onChanged: () => void }) {
+  const { t, locale } = useI18n();
+  const { shop } = useShop();
+  const [filter, setFilter] = useState<(typeof AGENDA_FILTERS)[number]>("all");
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
+  const matches = (a: Appointment, f: (typeof AGENDA_FILTERS)[number]) => f === "all" || (f === "missed" ? a.status === "no_show" || a.status === "cancelled" : a.status === f);
+  const count = (f: (typeof AGENDA_FILTERS)[number]) => appointments.filter((a) => matches(a, f)).length;
+  const shown = appointments.filter((a) => matches(a, filter)).sort((a, b) => a.startsAt.localeCompare(b.startsAt));
+  const today = zonedIsoDate(new Date(), tz);
+  const days = Array.from({ length: 7 }, (_, i) => addDaysIso(start, i))
+    .map((d) => ({ day: d, items: shown.filter((a) => zonedIsoDate(new Date(a.startsAt), tz) === d) }))
+    .filter((g) => g.items.length);
+
+  const act = async (a: Appointment, to: string) => {
+    setBusyId(a.id);
+    setError(null);
+    try {
+      await api(`/shops/${shop.id}/appointments/${a.id}/status`, { method: "POST", json: { status: to } });
+      onChanged();
+    } catch (e) {
+      setError(e);
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      <Tabs
+        value={filter}
+        onChange={setFilter}
+        items={AGENDA_FILTERS.map((f) => ({ value: f, label: t(f === "all" ? "in.all" : f === "missed" ? "ap.missed" : (`st.${f}` as DictKey)), count: count(f) }))}
+      />
+      <ErrorNote error={error} />
+      {days.length === 0 ? (
+        <Card>
+          <p className="py-8 text-center text-sm muted">{t("ap.agendaEmpty")}</p>
+        </Card>
+      ) : (
+        days.map((g) => (
+          <section key={g.day}>
+            <h3 className="mb-2 flex items-center gap-2 text-sm font-semibold strong">
+              {g.day === today && <span className="size-2 rounded-full bg-[var(--accent)]" />}
+              {dayLabel(g.day, locale)}
+              <span className="num text-xs font-normal muted">({num(g.items.length, locale)})</span>
+            </h3>
+            <ul className="space-y-2">
+              {g.items.map((a) => {
+                const next = (APPT_ACTIONS[a.status] ?? [])[0];
+                return (
+                  <li key={a.id} className="card flex items-center gap-3 p-3">
+                    <span className="h-12 w-1.5 shrink-0 rounded-full" style={{ background: a.service.color }} />
+                    <button className="min-w-0 flex-1 text-start" onClick={() => onSelect(a)}>
+                      <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                        <span className="num whitespace-nowrap text-sm font-semibold strong">
+                          {time(a.startsAt, locale, tz)}–{time(a.endsAt, locale, tz)}
+                        </span>
+                        <Badge tone={statusTone(a.status)}>{t(`st.${a.status}` as DictKey)}</Badge>
+                        {a.paymentStatus === "paid" && <Badge tone="success">{t("pay.paid")}</Badge>}
+                      </span>
+                      <span className="mt-0.5 block truncate text-sm strong">{a.customer.name ?? "-"}</span>
+                      <span className="block truncate text-xs muted">
+                        {a.service.name} · {a.staff.name}
+                        {a.customer.noShowCount > 0 && <span className="text-danger"> · {num(a.customer.noShowCount, locale)} {t("c.noShows")}</span>}
+                      </span>
+                    </button>
+                    <span className="flex shrink-0 items-center gap-1">
+                      {a.customer.phone && (
+                        <a href={`tel:${a.customer.phone}`} className="rounded-full p-2 muted hover:bg-[var(--surface-sunken)]" aria-label={t("ap.call")}>
+                          <Phone className="size-4" />
+                        </a>
+                      )}
+                      {next && (
+                        <Button size="sm" variant={next.variant === "danger" ? "secondary" : next.variant ?? "secondary"} loading={busyId === a.id} onClick={() => act(a, next.to)}>
+                          {t(next.label)}
+                        </Button>
+                      )}
+                      <button onClick={() => onSelect(a)} className="rounded-full p-2 muted hover:bg-[var(--surface-sunken)]" aria-label={t("ap.details")}>
+                        <MoreHorizontal className="size-4" />
+                      </button>
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+          </section>
+        ))
+      )}
+    </div>
+  );
+}
 
 function AppointmentModal({ appt, tz, onClose, onChanged }: { appt: Appointment; tz: string; onClose: () => void; onChanged: () => void }) {
   const { t, locale } = useI18n();

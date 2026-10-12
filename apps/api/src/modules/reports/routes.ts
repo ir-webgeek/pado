@@ -1,7 +1,7 @@
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
 import { and, desc, eq, gte, lt, sql } from "drizzle-orm";
 import { z } from "zod";
-import { appointments, conversations, customers, orderItems, orders, payments, services, staff, workingHours } from "@shopino/db";
+import { agentRuns, appointments, automationEvents, conversations, customers, orderItems, orders, payments, services, staff, workingHours } from "@shopino/db";
 import { BLOCKING_APPOINTMENT_STATUSES, addDaysIso, weekdayOfIso, zonedIsoDate, zonedToUtc } from "@shopino/shared";
 import type { Ctx } from "../../lib/context";
 import { requireShop } from "../../lib/auth";
@@ -121,16 +121,17 @@ export const reportRoutes =
       // staff utilization today = booked minutes / working minutes
       const weekday = weekdayOfIso(today);
       const hours = await ctx.db
-        .select({ staffId: workingHours.staffId, minutes: sql<number>`sum(${workingHours.endMin} - ${workingHours.startMin})::int` })
+        .select({ staffId: workingHours.staffId, name: staff.name, minutes: sql<number>`sum(${workingHours.endMin} - ${workingHours.startMin})::int` })
         .from(workingHours)
+        .innerJoin(staff, eq(staff.id, workingHours.staffId))
         .where(and(eq(workingHours.shopId, shopId), eq(workingHours.weekday, weekday)))
-        .groupBy(workingHours.staffId);
+        .groupBy(workingHours.staffId, staff.name);
       const booked = new Map<string, number>();
       for (const a of todayAppts) {
         if (!BLOCKING_APPOINTMENT_STATUSES.includes(a.status) && a.status !== "completed") continue;
         booked.set(a.staffId, (booked.get(a.staffId) ?? 0) + (a.endsAt.getTime() - a.startsAt.getTime()) / 60_000);
       }
-      const utilization = hours.map((h) => ({ staffId: h.staffId, bookedMin: booked.get(h.staffId) ?? 0, workingMin: h.minutes }));
+      const utilization = hours.map((h) => ({ staffId: h.staffId, name: h.name, bookedMin: booked.get(h.staffId) ?? 0, workingMin: h.minutes }));
 
       const trendByDay = new Map(trend.map((t) => [t.day, t]));
       const week = Array.from({ length: 7 }, (_, i) => {
@@ -161,6 +162,133 @@ export const reportRoutes =
         today: { appointments: todayAppts, utilization },
       };
     });
+
+    // how sales and the app itself are doing over a period: revenue trend, channels, chat -> sale funnel,
+    // AI and inbox health, bookings
+    app.get(
+      "/:shopId/dashboard/insights",
+      { preHandler: requireShop(ctx), schema: { params, querystring: z.object({ days: z.coerce.number().int().refine((d) => d === 7 || d === 30 || d === 90).default(30) }) } },
+      async (req) => {
+        const shopId = req.shop.id;
+        const tz = req.shop.timezone;
+        const days = req.query.days;
+        const today = zonedIsoDate(new Date(), tz);
+        const from = zonedToUtc(addDaysIso(today, -(days - 1)), 0, tz);
+        const prevFrom = zonedToUtc(addDaysIso(today, -(2 * days - 1)), 0, tz);
+        const dayOf = (col: unknown) => sql<string>`to_char(${col} at time zone ${tz}, 'YYYY-MM-DD')`;
+
+        const [orderDays, apptDays, channels, [prev], [chat], [convs], [ai], [autos], [inbox], [book], [upcoming]] = await Promise.all([
+          ctx.db
+            .select({ day: dayOf(orders.paidAt), total: sql<number>`sum(${orders.total})::bigint`, n: sql<number>`count(*)::int` })
+            .from(orders)
+            .where(and(eq(orders.shopId, shopId), PAID, gte(orders.paidAt, from)))
+            .groupBy(sql`1`),
+          ctx.db
+            .select({ day: dayOf(appointments.completedAt), total: sql<number>`sum(${appointments.price} - ${appointments.discountTotal})::bigint`, n: sql<number>`count(*)::int` })
+            .from(appointments)
+            .where(and(eq(appointments.shopId, shopId), eq(appointments.status, "completed"), gte(appointments.completedAt, from)))
+            .groupBy(sql`1`),
+          ctx.db
+            .select({ channel: orders.channel, total: sql<number>`sum(${orders.total})::bigint`, n: sql<number>`count(*)::int` })
+            .from(orders)
+            .where(and(eq(orders.shopId, shopId), PAID, gte(orders.paidAt, from)))
+            .groupBy(orders.channel)
+            .orderBy(sql`2 desc`),
+          ctx.db
+            .select({ total: sql<number>`coalesce(sum(${orders.total}), 0)::bigint`, n: sql<number>`count(*)::int` })
+            .from(orders)
+            .where(and(eq(orders.shopId, shopId), PAID, gte(orders.paidAt, prevFrom), lt(orders.paidAt, from))),
+          ctx.db
+            .select({
+              orders: sql<number>`count(*) filter (where ${orders.conversationId} is not null)::int`,
+              revenue: sql<number>`coalesce(sum(${orders.total}) filter (where ${orders.conversationId} is not null), 0)::bigint`,
+            })
+            .from(orders)
+            .where(and(eq(orders.shopId, shopId), PAID, gte(orders.paidAt, from))),
+          ctx.db
+            .select({
+              started: sql<number>`count(*) filter (where ${conversations.createdAt} >= ${from.toISOString()})::int`,
+              active: sql<number>`count(*) filter (where ${conversations.lastInboundAt} >= ${from.toISOString()})::int`,
+              visited: sql<number>`count(*) filter (where ${conversations.lastSiteVisitAt} >= ${from.toISOString()})::int`,
+            })
+            .from(conversations)
+            .where(eq(conversations.shopId, shopId)),
+          ctx.db
+            .select({
+              runs: sql<number>`count(*)::int`,
+              replies: sql<number>`count(*) filter (where ${agentRuns.reply} is not null)::int`,
+              handoffs: sql<number>`count(*) filter (where ${agentRuns.handoff} is not null)::int`,
+              errors: sql<number>`count(*) filter (where ${agentRuns.error} is not null)::int`,
+              cost: sql<number>`coalesce(sum(${agentRuns.cost}), 0)::bigint`,
+              avgMs: sql<number>`coalesce(avg(${agentRuns.durationMs}), 0)::int`,
+            })
+            .from(agentRuns)
+            .where(and(eq(agentRuns.shopId, shopId), gte(agentRuns.createdAt, from))),
+          ctx.db
+            .select({ hits: sql<number>`count(*) filter (where ${automationEvents.ok})::int`, failed: sql<number>`count(*) filter (where not ${automationEvents.ok})::int` })
+            .from(automationEvents)
+            .where(and(eq(automationEvents.shopId, shopId), gte(automationEvents.createdAt, from))),
+          ctx.db
+            .select({
+              needsHuman: sql<number>`count(*) filter (where ${conversations.status} = 'needs_human')::int`,
+              inProgress: sql<number>`count(*) filter (where ${conversations.status} = 'in_progress')::int`,
+              resolved: sql<number>`count(*) filter (where ${conversations.status} = 'resolved' and ${conversations.resolvedAt} >= ${from.toISOString()})::int`,
+            })
+            .from(conversations)
+            .where(eq(conversations.shopId, shopId)),
+          ctx.db
+            .select({
+              total: sql<number>`count(*)::int`,
+              completed: sql<number>`count(*) filter (where ${appointments.status} = 'completed')::int`,
+              noShow: sql<number>`count(*) filter (where ${appointments.status} = 'no_show')::int`,
+              cancelled: sql<number>`count(*) filter (where ${appointments.status} = 'cancelled')::int`,
+              online: sql<number>`count(*) filter (where ${appointments.channel} <> 'pos')::int`,
+            })
+            .from(appointments)
+            .where(and(eq(appointments.shopId, shopId), gte(appointments.startsAt, from), lt(appointments.startsAt, new Date()))),
+          ctx.db
+            .select({ n: sql<number>`count(*)::int` })
+            .from(appointments)
+            .where(and(eq(appointments.shopId, shopId), gte(appointments.startsAt, new Date()), lt(appointments.startsAt, new Date(Date.now() + 7 * 86400_000)), sql`${appointments.status} in ('pending','confirmed')`)),
+        ]);
+
+        const byDay = (rows: { day: string; total: number; n: number }[]) => new Map(rows.map((r) => [r.day, r]));
+        const od = byDay(orderDays);
+        const ad = byDay(apptDays);
+        const trend = Array.from({ length: days }, (_, i) => {
+          const day = addDaysIso(today, i - (days - 1));
+          return { day, orders: Number(od.get(day)?.total ?? 0), orderCount: od.get(day)?.n ?? 0, bookings: Number(ad.get(day)?.total ?? 0) };
+        });
+        const revenue = trend.reduce((a, d) => a + d.orders, 0);
+        const paidOrders = trend.reduce((a, d) => a + d.orderCount, 0);
+        const prevTotal = Number(prev?.total ?? 0);
+        return {
+          days,
+          trend,
+          totals: {
+            revenue,
+            bookings: trend.reduce((a, d) => a + d.bookings, 0),
+            orders: paidOrders,
+            avgOrder: paidOrders ? Math.round(revenue / paidOrders) : 0,
+            changePct: prevTotal ? Math.round(((revenue - prevTotal) / prevTotal) * 100) : null,
+          },
+          channels: channels.map((c) => ({ channel: c.channel, total: Number(c.total), orders: c.n })),
+          funnel: { chats: convs?.active ?? 0, newChats: convs?.started ?? 0, siteVisits: convs?.visited ?? 0, chatOrders: chat?.orders ?? 0, chatRevenue: Number(chat?.revenue ?? 0) },
+          ai: {
+            runs: ai?.runs ?? 0,
+            replies: ai?.replies ?? 0,
+            handoffs: ai?.handoffs ?? 0,
+            errors: ai?.errors ?? 0,
+            cost: Number(ai?.cost ?? 0),
+            avgMs: ai?.avgMs ?? 0,
+            automationHits: autos?.hits ?? 0,
+            automationFailed: autos?.failed ?? 0,
+          },
+          inbox: { needsHuman: inbox?.needsHuman ?? 0, inProgress: inbox?.inProgress ?? 0, resolved: inbox?.resolved ?? 0 },
+          bookings: { past: book?.total ?? 0, completed: book?.completed ?? 0, noShow: book?.noShow ?? 0, cancelled: book?.cancelled ?? 0, online: book?.online ?? 0, upcoming7d: upcoming?.n ?? 0 },
+        };
+      },
+    );
 
     app.get(
       "/:shopId/reports/sales",
