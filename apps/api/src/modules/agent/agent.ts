@@ -3,7 +3,8 @@ import { desc, eq, inArray } from "drizzle-orm";
 import { messages, RAG_SOURCES, type ShopSettings } from "@shopino/db";
 import { env } from "../../config";
 import { searchKnowledge } from "../knowledge/search";
-import { buildSystemPrompt, formatKnowledge, retrievalQuery } from "./persona";
+import { zonedIsoDate } from "@shopino/shared";
+import { buildSystemPrompt, formatKnowledge, pickKnowledge, retrievalQuery } from "./persona";
 import { addUsage, agentModel, aiAvailable, anthropic, costOf, emptyUsage, type Usage } from "./llm";
 import { fallbackParams } from "./models";
 import type { AgentToolContext } from "./tools";
@@ -65,11 +66,14 @@ async function augmentLastTurn(shop: AgentShop, ctx: AgentToolContext, msgs: Bet
   const question = typeof last.content === "string" ? last.content : "";
   const rag = shop.settings.rag;
   const customerTurns = msgs.filter((m) => m.role === "user" && typeof m.content === "string").map((m) => m.content as string);
-  const hits = rag.enabled ? await searchKnowledge(ctx.db, ctx.shopId, retrievalQuery(customerTurns), rag.topK, ctx.ragSources) : [];
+  // over-fetch, then filter by relevance and source preference
+  const found = rag.enabled ? await searchKnowledge(ctx.db, ctx.shopId, retrievalQuery(customerTurns), rag.topK * 2, ctx.ragSources) : [];
+  const hits = pickKnowledge(found, rag);
   const blocks: BetaContentBlockParam[] = [{ type: "text", text: question }];
   const extra = [
     pageContext ? `[Customer is currently viewing: ${pageContext}]` : "",
-    hits.length ? `[Shop knowledge that may help - turn it into a helpful recommendation, keep prices from tools]\n${formatKnowledge(hits)}` : "",
+    hits.length ? `[Shop knowledge that may help - turn it into a helpful recommendation, keep prices from tools]\n${formatKnowledge(hits, rag.snippetChars)}` : "",
+    !hits.length && rag.enabled && rag.strict ? "[No shop knowledge matched this message]" : "",
   ].filter(Boolean);
   if (extra.length) blocks.push({ type: "text", text: extra.join("\n\n") });
   msgs[msgs.length - 1] = { role: "user", content: blocks };
@@ -84,7 +88,8 @@ export async function runAgent(shop: AgentShop, ctx: AgentToolContext, pageConte
   await augmentLastTurn(shop, ctx, msgs, pageContext);
 
   const tools = toolsFor(shop.kind).map((t) => t.tool);
-  const system = systemPrompt(shop, ctx.channel);
+  // the shop's own date decides whether a promotion is still on
+  const system = systemPrompt(shop, ctx.channel, zonedIsoDate(new Date(), shop.timezone));
   let reply: string | null = null;
 
   const model = agentModel();

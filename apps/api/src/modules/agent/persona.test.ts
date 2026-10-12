@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_SHOP_SETTINGS } from "@shopino/db";
-import { buildSystemPrompt, formatKnowledge, retrievalQuery } from "./persona";
+import { buildSystemPrompt, formatKnowledge, handoffKeyword, pickKnowledge, promoActive, retrievalQuery } from "./persona";
+import { faNormalize } from "../../lib/fa-search";
 import { trainPersonaFromPairs } from "./persona-train";
 
 const settings = (sales: Partial<typeof DEFAULT_SHOP_SETTINGS.sales> = {}) => ({ ...DEFAULT_SHOP_SETTINGS, sales: { ...DEFAULT_SHOP_SETTINGS.sales, ...sales } });
@@ -58,5 +59,55 @@ describe("persona training from chat history", () => {
     const r = trainPersonaFromPairs([]);
     expect(r.examples).toEqual([]);
     expect(r.greeting).toBe("");
+  });
+});
+
+describe("reply controls", () => {
+  it("address, register, language, price policy, phone, banned words", () => {
+    const p = buildSystemPrompt(
+      { name: "x", kind: "retail", settings: settings({ address: "informal", register: "written", language: "fa", priceInChat: "link", askPhone: true, bannedWords: ["ارزون"] }) },
+      "instagram",
+    );
+    expect(p).toContain("Address the customer as تو");
+    expect(p).toContain("standard written Persian");
+    expect(p).toContain("Always reply in Persian");
+    expect(p).toContain("Do not write prices in the chat");
+    expect(p).toContain("ask for the customer's mobile number");
+    expect(p).toContain('Never use these words or phrases: "ارزون"');
+  });
+  it("promotion only until its last day", () => {
+    const sales = { promo: "۲۰٪ تخفیف کت‌ها تا آخر هفته", promoUntil: "2026-10-15" };
+    expect(promoActive(sales, "2026-10-15")).toBe(true);
+    expect(promoActive(sales, "2026-10-16")).toBe(false);
+    expect(buildSystemPrompt({ name: "x", kind: "retail", settings: settings(sales) }, "instagram", "2026-10-14")).toContain("Current offer");
+    expect(buildSystemPrompt({ name: "x", kind: "retail", settings: settings(sales) }, "instagram", "2026-10-20")).not.toContain("Current offer");
+  });
+  it("strict knowledge mode sends uncovered policy questions to a person", () => {
+    const st = settings();
+    st.rag = { ...st.rag, strict: true };
+    expect(buildSystemPrompt({ name: "x", kind: "retail", settings: st }, "web")).toContain("answer only from the shop knowledge");
+  });
+  it("keyword handoff ignores keyboard differences", () => {
+    expect(handoffKeyword("سلام، می‌خوام مرجوعي بدم", ["مرجوعی", "شکایت"], faNormalize)).toBe("مرجوعی");
+    expect(handoffKeyword("قیمت کت چنده؟", ["مرجوعی"], faNormalize)).toBeNull();
+  });
+});
+
+describe("knowledge picking", () => {
+  const hits = [
+    { id: "1", source: "dm_history", score: 0.3 },
+    { id: "2", source: "manual", score: 0.2 },
+    { id: "3", source: "comments", score: 0.05 },
+    { id: "4", source: "faq", score: 0.1 },
+  ];
+  it("drops weak matches and prefers what the shop wrote", () => {
+    expect(pickKnowledge(hits, { minRelevance: "balanced", preferManual: true, topK: 2 }).map((h) => h.id)).toEqual(["2", "1"]);
+    expect(pickKnowledge(hits, { minRelevance: "balanced", preferManual: false, topK: 2 }).map((h) => h.id)).toEqual(["1", "2"]);
+    expect(pickKnowledge(hits, { minRelevance: "any", preferManual: false, topK: 8 })).toHaveLength(4);
+    expect(pickKnowledge(hits, { minRelevance: "high", preferManual: false, topK: 8 }).map((h) => h.id)).toEqual(["1", "2"]);
+  });
+  it("cuts long snippets", () => {
+    const long = "ارسال ".repeat(200);
+    expect(formatKnowledge([{ title: "ارسال", content: long, source: "manual" }], 150).length).toBeLessThan(190);
   });
 });

@@ -136,6 +136,14 @@ export interface ShopSettings {
     autoLearn: boolean;
     /** extra instructions for how to use retrieved knowledge */
     instructions: string;
+    /** drop weak matches: any / balanced / high relevance only */
+    minRelevance: "any" | "balanced" | "high";
+    /** answers the shop wrote (manual, FAQ) rank above ones learned from chats and comments */
+    preferManual: boolean;
+    /** policy questions are answered only from knowledge; with nothing found, a person is asked */
+    strict: boolean;
+    /** longest snippet passed to the model (characters) */
+    snippetChars: number;
     lastRun: { at: string; products: number; comments: number; dms: number; error?: string } | null;
   };
 }
@@ -158,7 +166,24 @@ export interface SalesPersona {
   tonePreset: (typeof TONE_PRESETS)[number];
   style: (typeof SALES_STYLES)[number];
   emoji: "none" | "few" | "many";
-  length: "short" | "medium";
+  length: "short" | "medium" | "detailed";
+  /** how the customer is addressed: شما (formal), تو (close), or mirror the customer */
+  address: "auto" | "formal" | "informal";
+  /** everyday spoken Persian or standard written Persian */
+  register: "colloquial" | "written";
+  /** reply language; auto = the customer's */
+  language: "auto" | "fa" | "en";
+  /** quote prices in the chat, or point to the product link for the price */
+  priceInChat: "show" | "link";
+  /** get the customer's mobile before creating an order */
+  askPhone: boolean;
+  /** words and phrases the assistant must never use */
+  bannedWords: string[];
+  /** current offer to mention when relevant, until the given day (YYYY-MM-DD, empty = no end) */
+  promo: string;
+  promoUntil: string;
+  /** a customer message containing any of these goes straight to a person, without AI */
+  handoffKeywords: string[];
   /** suggest one complementary in-stock item once the customer has chosen */
   upsell: boolean;
   /** end replies with one question that moves the sale forward */
@@ -212,6 +237,15 @@ export const DEFAULT_SHOP_SETTINGS: ShopSettings = {
     style: "consultative",
     emoji: "few",
     length: "short",
+    address: "auto",
+    register: "colloquial",
+    language: "auto",
+    priceInChat: "show",
+    askPhone: false,
+    bannedWords: [],
+    promo: "",
+    promoUntil: "",
+    handoffKeywords: [],
     upsell: true,
     followUp: true,
     scarcity: false,
@@ -228,6 +262,10 @@ export const DEFAULT_SHOP_SETTINGS: ShopSettings = {
     sources: { manual: true, faq: true, dm_history: true, products: true, comments: true },
     autoLearn: true,
     instructions: "",
+    minRelevance: "balanced",
+    preferManual: true,
+    strict: false,
+    snippetChars: 600,
     lastRun: null,
   },
 };

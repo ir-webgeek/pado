@@ -1,8 +1,9 @@
 "use client";
 
 import clsx from "clsx";
-import { Eye, GraduationCap, Plus, Trash2, UserRound } from "lucide-react";
-import { useState } from "react";
+import { Eye, GraduationCap, Plus, Trash2, UserRound, X } from "lucide-react";
+import { useEffect, useState } from "react";
+import { DatePicker } from "@/components/date-picker";
 import { Badge, Button, Card, ErrorNote, Field, Input, Modal, Spinner, Textarea, Toggle } from "@/components/ui";
 import { api, useApi } from "@/lib/api";
 import { dateTime, num } from "@/lib/format";
@@ -18,7 +19,16 @@ export interface Persona {
   tonePreset: (typeof TONES)[number];
   style: (typeof STYLES)[number];
   emoji: "none" | "few" | "many";
-  length: "short" | "medium";
+  length: "short" | "medium" | "detailed";
+  address: "auto" | "formal" | "informal";
+  register: "colloquial" | "written";
+  language: "auto" | "fa" | "en";
+  priceInChat: "show" | "link";
+  askPhone: boolean;
+  bannedWords: string[];
+  promo: string;
+  promoUntil: string;
+  handoffKeywords: string[];
   upsell: boolean;
   followUp: boolean;
   scarcity: boolean;
@@ -29,7 +39,11 @@ export interface Persona {
   examples: { customer: string; reply: string }[];
   trainedAt: string | null;
 }
-interface Proposal extends Omit<Persona, "assistantName" | "style" | "upsell" | "followUp" | "scarcity" | "trainedAt"> {
+interface Proposal
+  extends Omit<
+    Persona,
+    "assistantName" | "style" | "upsell" | "followUp" | "scarcity" | "trainedAt" | "address" | "register" | "language" | "priceInChat" | "askPhone" | "bannedWords" | "promo" | "promoUntil" | "handoffKeywords"
+  > {
   toneDescription?: string;
   stats: { pairs: number; avgReplyLength: number; emojiShare: number };
 }
@@ -202,7 +216,59 @@ export function SalesPersonaEditor({ persona, tone, onSaved }: { persona: Person
         </div>
         <div>
           <span className="label">{t("sp.length")}</span>
-          <Segmented value={p.length} options={["short", "medium"] as const} onChange={(v) => set({ length: v })} label={(v) => t(`sp.length.${v}` as DictKey)} />
+          <Segmented value={p.length} options={["short", "medium", "detailed"] as const} onChange={(v) => set({ length: v })} label={(v) => t(`sp.length.${v}` as DictKey)} />
+        </div>
+      </div>
+
+      <div className="space-y-4 rounded-2xl border border-[var(--border)] p-4">
+        <p className="text-sm font-semibold strong">{t("sp.controls")}</p>
+        <div className="flex flex-wrap gap-6">
+          <div>
+            <span className="label">{t("sp.language")}</span>
+            <Segmented value={p.language} options={["auto", "fa", "en"] as const} onChange={(v) => set({ language: v })} label={(v) => t(`sp.language.${v}` as DictKey)} />
+          </div>
+          {p.language !== "en" && (
+            <>
+              <div>
+                <span className="label">{t("sp.address")}</span>
+                <Segmented value={p.address} options={["auto", "formal", "informal"] as const} onChange={(v) => set({ address: v })} label={(v) => t(`sp.address.${v}` as DictKey)} />
+              </div>
+              <div>
+                <span className="label">{t("sp.register")}</span>
+                <Segmented value={p.register} options={["colloquial", "written"] as const} onChange={(v) => set({ register: v })} label={(v) => t(`sp.register.${v}` as DictKey)} />
+              </div>
+            </>
+          )}
+          <div>
+            <span className="label">{t("sp.priceInChat")}</span>
+            <Segmented value={p.priceInChat} options={["show", "link"] as const} onChange={(v) => set({ priceInChat: v })} label={(v) => t(`sp.priceInChat.${v}` as DictKey)} />
+          </div>
+        </div>
+        <Toggle checked={p.askPhone} onChange={(v) => set({ askPhone: v })} label={t("sp.askPhone")} />
+        <div className="grid gap-4 md:grid-cols-2">
+          <Field label={t("sp.bannedWords")} hint={t("sp.listHint")}>
+            <ListInput value={p.bannedWords} max={30} onChange={(bannedWords) => set({ bannedWords })} placeholder="ارزون، تخفیف ویژه" />
+          </Field>
+          <Field label={t("sp.handoffKeywords")} hint={t("sp.handoffKeywordsHint")}>
+            <ListInput value={p.handoffKeywords} max={30} onChange={(handoffKeywords) => set({ handoffKeywords })} placeholder="مرجوعی، شکایت، عمده" />
+          </Field>
+        </div>
+        <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_16rem]">
+          <Field label={t("sp.promo")} hint={t("sp.promoHint")}>
+            <Input value={p.promo} maxLength={300} placeholder="۲۰٪ تخفیف همه کت‌ها تا آخر هفته" onChange={(e) => set({ promo: e.target.value })} />
+          </Field>
+          <div>
+            <span className="label">{t("sp.promoUntil")}</span>
+            <div className="flex items-center gap-1">
+              <DatePicker value={p.promoUntil} onChange={(promoUntil) => set({ promoUntil })} className="flex-1" />
+              {p.promoUntil && (
+                <button type="button" onClick={() => set({ promoUntil: "" })} className="rounded-full p-1.5 muted hover:text-danger" aria-label={t("sp.noEnd")}>
+                  <X className="size-4" />
+                </button>
+              )}
+            </div>
+            {!p.promoUntil && <span className="mt-1 block text-xs muted">{t("sp.noEnd")}</span>}
+          </div>
         </div>
       </div>
       <div className="grid gap-2 sm:grid-cols-3">
@@ -220,18 +286,7 @@ export function SalesPersonaEditor({ persona, tone, onSaved }: { persona: Person
         </Field>
       </div>
       <Field label={t("sp.phrases")} hint={t("sp.phrasesHint")}>
-        <Input
-          value={p.phrases.join("، ")}
-          onChange={(e) =>
-            set({
-              phrases: e.target.value
-                .split(/[،,]/)
-                .map((x) => x.trim())
-                .filter(Boolean)
-                .slice(0, 12),
-            })
-          }
-        />
+        <ListInput value={p.phrases} max={12} onChange={(phrases) => set({ phrases })} />
       </Field>
 
       <PairList
@@ -261,6 +316,21 @@ export function SalesPersonaEditor({ persona, tone, onSaved }: { persona: Person
       {preview && <PromptPreview onClose={() => setPreview(false)} />}
     </Card>
   );
+}
+
+/** Comma-separated list (Persian or Latin comma). Parsed on blur so typing a separator is not swallowed. */
+function ListInput({ value, onChange, max, placeholder }: { value: string[]; onChange: (v: string[]) => void; max: number; placeholder?: string }) {
+  const [text, setText] = useState(value.join("، "));
+  useEffect(() => setText(value.join("، ")), [value]);
+  const commit = () =>
+    onChange(
+      text
+        .split(/[،,\n]/)
+        .map((x) => x.trim())
+        .filter(Boolean)
+        .slice(0, max),
+    );
+  return <Input value={text} placeholder={placeholder} onChange={(e) => setText(e.target.value)} onBlur={commit} onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), commit())} />;
 }
 
 function Row({ k, v }: { k: string; v: string }) {

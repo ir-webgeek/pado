@@ -69,23 +69,26 @@ export function DatePicker({
   max,
   tz = "Asia/Tehran",
   className,
+  placeholder,
 }: {
+  /** "YYYY-MM-DD", or "" for no date yet */
   value: string;
   onChange: (iso: string) => void;
   min?: string;
   max?: string;
   tz?: string;
   className?: string;
+  placeholder?: string;
 }) {
   const { locale, t } = useI18n();
   const [open, setOpen] = useState(false);
-  const [anchor, setAnchor] = useState(value);
-  const ref = useRef<HTMLDivElement>(null);
   const today = zonedIsoDate(new Date(), tz);
+  const [anchor, setAnchor] = useState(value || today);
+  const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!open) return;
-    setAnchor(value);
+    setAnchor(value || today);
     const onDown = (e: PointerEvent) => !ref.current?.contains(e.target as Node) && setOpen(false);
     // capture + preventDefault so Escape closes the picker without also closing a surrounding <dialog>
     const onKey = (e: KeyboardEvent) => {
@@ -100,7 +103,7 @@ export function DatePicker({
       document.removeEventListener("pointerdown", onDown);
       document.removeEventListener("keydown", onKey, true);
     };
-  }, [open, value]);
+  }, [open, value, today]);
 
   const pick = (d: string) => {
     onChange(d);
@@ -112,13 +115,17 @@ export function DatePicker({
       <button type="button" onClick={() => setOpen((o) => !o)} className="input flex items-center gap-2 text-start" aria-haspopup="dialog" aria-expanded={open}>
         <CalendarDays className="size-4 shrink-0 muted" />
         {/* ICU's full fa pattern puts the year first, so compose weekday + "day month year" */}
-        <span className="num truncate">
-          {fmtDate(`${value}T12:00:00Z`, locale, "UTC", { weekday: "long" })} {fmtDate(`${value}T12:00:00Z`, locale, "UTC", { day: "numeric", month: "long", year: "numeric" })}
-        </span>
+        {value ? (
+          <span className="num truncate">
+            {fmtDate(`${value}T12:00:00Z`, locale, "UTC", { weekday: "long" })} {fmtDate(`${value}T12:00:00Z`, locale, "UTC", { day: "numeric", month: "long", year: "numeric" })}
+          </span>
+        ) : (
+          <span className="truncate muted">{placeholder ?? t("a.pickDate")}</span>
+        )}
       </button>
       {open && (
         <div role="dialog" className="absolute start-0 top-full z-50 mt-2 w-72 rounded-2xl border border-[var(--border)] bg-[var(--bg-elev)] p-3 shadow-2xl animate-rise">
-          <ShamsiCalendar locale={locale} month={anchor} onMonthChange={setAnchor} selected={value} today={today} min={min} max={max} onPick={pick} />
+          <ShamsiCalendar locale={locale} month={anchor} onMonthChange={setAnchor} selected={value || undefined} today={today} min={min} max={max} onPick={pick} />
           <div className="mt-2 flex justify-between border-t border-[var(--border)] pt-2">
             <button type="button" className="rounded-full px-3 py-1 text-xs strong hover:bg-[var(--surface-sunken)]" onClick={() => pick(today)} disabled={Boolean((min && today < min) || (max && today > max))}>
               {t("a.today")}

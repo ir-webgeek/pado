@@ -3,7 +3,7 @@
 import { BookOpen, Brain, Database, LayoutTemplate, Plus, RefreshCw, Search, Sparkles, Trash2, Wand2 } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
-import { Badge, Button, Card, Empty, ErrorNote, Field, Input, Modal, PageHeader, Spinner, Textarea, Toggle } from "@/components/ui";
+import { Badge, Button, Card, Empty, ErrorNote, Field, Input, Modal, PageHeader, Select, Spinner, Textarea, Toggle } from "@/components/ui";
 import { api, useApi } from "@/lib/api";
 import { dateTime, num } from "@/lib/format";
 import type { DictKey } from "@/lib/i18n";
@@ -347,6 +347,10 @@ interface Rag {
   sources: Record<RagSource, boolean>;
   autoLearn: boolean;
   instructions: string;
+  minRelevance: "any" | "balanced" | "high";
+  preferManual: boolean;
+  strict: boolean;
+  snippetChars: number;
   lastRun: { at: string; products: number; comments: number; dms: number; error?: string } | null;
 }
 
@@ -408,6 +412,22 @@ function RagSettings() {
       <Field label={t("rag.topK")}>
         <Input type="number" min={1} max={8} value={rag.topK} onChange={(e) => set({ topK: Math.min(8, Math.max(1, Number(e.target.value) || 1)) })} />
       </Field>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Field label={t("rag.minRelevance")} hint={t("rag.minRelevanceHint")}>
+          <Select value={rag.minRelevance} disabled={!rag.enabled} onChange={(e) => set({ minRelevance: e.target.value as Rag["minRelevance"] })}>
+            {(["any", "balanced", "high"] as const).map((v) => (
+              <option key={v} value={v}>
+                {t(`rag.rel.${v}` as DictKey)}
+              </option>
+            ))}
+          </Select>
+        </Field>
+        <Field label={t("rag.snippetChars")} hint={t("rag.snippetCharsHint")}>
+          <Input type="number" min={150} max={2000} step={50} disabled={!rag.enabled} value={rag.snippetChars} onChange={(e) => set({ snippetChars: Math.min(2000, Math.max(150, Number(e.target.value) || 600)) })} />
+        </Field>
+      </div>
+      <Toggle checked={rag.preferManual} onChange={(v) => set({ preferManual: v })} label={t("rag.preferManual")} />
+      <Toggle checked={rag.strict} onChange={(v) => set({ strict: v })} label={t("rag.strict")} />
       <Field label={t("rag.instructions")}>
         <Textarea rows={3} maxLength={2000} placeholder={t("rag.instructionsPh")} value={rag.instructions} onChange={(e) => set({ instructions: e.target.value })} />
       </Field>

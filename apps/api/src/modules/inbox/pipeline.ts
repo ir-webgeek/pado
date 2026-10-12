@@ -13,6 +13,8 @@ import { replyToComment, sendPrivateReply, sendText, type IgAccount } from "../i
 import { escapeHtml, sendTelegram } from "../notifications/telegram";
 import { walletBalance } from "../wallet/service";
 import { flagForHuman, noteHumanReply, reopenIfResolved } from "./progress";
+import { handoffKeyword } from "../agent/persona";
+import { faNormalize } from "../../lib/fa-search";
 
 export interface InboundMessage {
   shopId: string;
@@ -153,6 +155,13 @@ export async function handleInbound(db: Database, queues: Queues, redis: Redis, 
 
   // ---- AI agent
   const fresh = await db.query.conversations.findFirst({ where: eq(conversations.id, conv!.id) });
+  // topics the shop wants a person for (complaints, returns, wholesale...) skip the AI entirely
+  const keyword = fresh!.mode === "agent" ? handoffKeyword(msg.text, settings.sales.handoffKeywords, faNormalize) : null;
+  if (keyword) {
+    await flagForHuman(db, shop.id, conv!.id, `keyword: ${keyword}`, { mode: "human" });
+    await queues.add("notify.handoff", { conversationId: conv!.id, reason: `keyword: ${keyword}` });
+    return { reply: null, handoff: `keyword: ${keyword}` };
+  }
   const agentOn = fresh!.mode === "agent" && settings.agent.enabled && planHas(shop.plan, "agent") && agentAvailable();
   if (!agentOn) return { reply: null, handoff: null };
   if ((await walletBalance(db, shop.id)) < env.AGENT_MIN_BALANCE) {

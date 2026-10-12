@@ -48,9 +48,30 @@ const EMOJI_TEXT: Record<SalesPersona["emoji"], string> = {
 const LENGTH_TEXT: Record<SalesPersona["length"], string> = {
   short: "Keep each reply to 1-3 short sentences (a DM, not an email).",
   medium: "Replies can be up to two short paragraphs when the customer needs details.",
+  detailed: "Give complete answers with the useful details (materials, sizing, delivery, care) in a few short paragraphs; still chat text, not an essay.",
 };
 
-export function buildSystemPrompt(shop: PromptShop, channel: PromptChannel): string {
+const ADDRESS_TEXT: Record<SalesPersona["address"], string> = {
+  auto: "Address the customer the way they address you (شما by default; تو only if they use it first).",
+  formal: "Always address the customer as شما.",
+  informal: "Address the customer as تو, warmly, like a friend who works at the shop.",
+};
+
+const REGISTER_TEXT: Record<SalesPersona["register"], string> = {
+  colloquial: "Write everyday spoken Persian (e.g. «داریم»، «میشه»، «براتون») with correct spelling.",
+  written: "Write standard written Persian (e.g. «موجود است»، «می‌توانید»), polite and clear.",
+};
+
+const LANGUAGE_TEXT: Record<SalesPersona["language"], string> = {
+  auto: "Reply in the customer's language (usually Persian).",
+  fa: "Always reply in Persian, even if the customer writes in another language or Finglish.",
+  en: "Always reply in English.",
+};
+
+/** The offer is shown until the end of its last day. */
+export const promoActive = (p: Pick<SalesPersona, "promo" | "promoUntil">, today: string) => Boolean(p.promo.trim()) && (!p.promoUntil || p.promoUntil >= today);
+
+export function buildSystemPrompt(shop: PromptShop, channel: PromptChannel, today = new Date().toISOString().slice(0, 10)): string {
   const a = shop.settings.agent;
   const p = shop.settings.sales;
   const sells = shop.kind === "retail" ? "products" : shop.kind === "services" ? "services by appointment" : "products and services by appointment";
@@ -68,6 +89,9 @@ export function buildSystemPrompt(shop: PromptShop, channel: PromptChannel): str
     "- Prices, stock, variants, services and free times come only from your tools. Never guess a number; if a tool has nothing, say so honestly and offer an alternative or a person.",
     "- For policies, sizing, shipping, care and anything the shop has explained before, use the shop knowledge attached to the message or search_knowledge. Present it as helpful advice, not as a quote from a document.",
     "- Prices are in Toman. Write numbers the way the customer writes (Persian digits for Persian).",
+    p.priceInChat === "link"
+      ? "- Do not write prices in the chat; send the product or order link where the customer sees the current price."
+      : "",
     "- Never ask for card numbers or send bank details; payment happens on the order or booking page.",
     "",
     "Sales approach:",
@@ -78,17 +102,26 @@ export function buildSystemPrompt(shop: PromptShop, channel: PromptChannel): str
     p.followUp ? "- End with one short question that moves things forward (size, colour, time, or whether to send the link), unless the customer is clearly done." : "",
     a.neverOfferDiscount ? "- Never offer or promise discounts." : "",
     "- For appointments: find the service, check today's date for relative dates, offer 2-4 concrete times, book once they pick one and give their name and mobile, then send the booking link. Mention a deposit if one is due.",
+    p.askPhone
+      ? "- Before creating an order, ask for the customer's mobile number (if you don't have it) and pass it to the tool."
+      : "",
     "- When the customer decides to buy, create the order and send the link from the tool.",
+    promoActive(p, today) ? `- Current offer (mention it once when it fits what the customer wants, never invent other offers): ${p.promo.trim()}` : "",
     "- Use handoff_to_human when unsure, for complaints, refunds, custom requests, or when the customer asks for a person.",
+    shop.settings.rag.enabled && shop.settings.rag.strict
+      ? "- Policies (shipping, returns, warranty, payment, sizing rules): answer only from the shop knowledge. If it does not cover the question, say you will check with the team and use handoff_to_human; never fill the gap yourself."
+      : "",
     "",
     "Voice:",
-    "- Reply in the customer's language (usually Persian). Plain chat text: no markdown, no headings, no lists unless comparing options.",
+    `- ${LANGUAGE_TEXT[p.language]} Plain chat text: no markdown, no headings, no lists unless comparing options.`,
+    p.language !== "en" ? `- ${ADDRESS_TEXT[p.address]} ${REGISTER_TEXT[p.register]}` : "",
     `- Tone: ${tone || "friendly and natural"}.`,
     `- ${LENGTH_TEXT[p.length]}`,
     `- ${EMOJI_TEXT[p.emoji]}`,
     p.greeting ? `- Start a new conversation with a greeting like: "${p.greeting}" (only at the start, not on every message).` : "",
     p.signOff ? `- When closing a sale or the chat, you may end with: "${p.signOff}".` : "",
     p.phrases.length ? `- Phrases this shop uses (use naturally, at most one per message): ${p.phrases.map((x) => `"${x}"`).join(", ")}.` : "",
+    p.bannedWords.length ? `- Never use these words or phrases: ${p.bannedWords.map((x) => `"${x}"`).join(", ")}.` : "",
   ];
   if (p.objections.length) {
     lines.push("", "How the shop answers common objections (adapt, keep the facts from tools):");
@@ -112,8 +145,31 @@ export function retrievalQuery(customerTurns: string[]): string {
   return last.length < 25 && prev ? `${prev} ${last}` : last;
 }
 
-/** Knowledge snippets as the assistant sees them: labelled by kind, product links included. */
-export function formatKnowledge(hits: { title: string; content: string; source: string }[]): string {
+/** Knowledge snippets as the assistant sees them: labelled by kind, product links included, long ones cut. */
+export function formatKnowledge(hits: { title: string; content: string; source: string }[], maxChars = 600): string {
   const label: Record<string, string> = { products: "product", comments: "answered before", dm_history: "answered before", faq: "faq", manual: "shop info" };
-  return hits.map((h) => `- (${label[h.source] ?? h.source}) ${h.title}: ${h.content}`).join("\n");
+  const cut = (s: string) => (s.length > maxChars ? `${s.slice(0, maxChars).replace(/\s+\S*$/, "")}...` : s);
+  return hits.map((h) => `- (${label[h.source] ?? h.source}) ${h.title}: ${cut(h.content)}`).join("\n");
+}
+
+const MIN_SCORE: Record<ShopSettings["rag"]["minRelevance"], number> = { any: 0, balanced: 0.08, high: 0.2 };
+const WRITTEN_BY_SHOP = new Set(["manual", "faq"]);
+
+/**
+ * Pick the snippets to attach: drop weak matches, then (optionally) let answers the shop wrote itself
+ * outrank ones learned from chats and comments, and keep the best `topK`.
+ */
+export function pickKnowledge<T extends { source: string; score: number }>(hits: T[], rag: Pick<ShopSettings["rag"], "minRelevance" | "preferManual" | "topK">): T[] {
+  const min = MIN_SCORE[rag.minRelevance];
+  const boost = (h: T) => h.score + (rag.preferManual && WRITTEN_BY_SHOP.has(h.source) ? 0.15 : 0);
+  return hits
+    .filter((h) => h.score >= min)
+    .sort((a, b) => boost(b) - boost(a))
+    .slice(0, rag.topK);
+}
+
+/** A customer message that must reach a person directly (complaints, returns, wholesale...). */
+export function handoffKeyword(text: string, keywords: string[], fold: (s: string) => string): string | null {
+  const t = fold(text);
+  return keywords.find((k) => k.trim() && t.includes(fold(k))) ?? null;
 }
