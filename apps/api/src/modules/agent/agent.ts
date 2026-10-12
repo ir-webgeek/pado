@@ -3,6 +3,7 @@ import { desc, eq, inArray } from "drizzle-orm";
 import { messages, RAG_SOURCES, type ShopSettings } from "@shopino/db";
 import { env } from "../../config";
 import { searchKnowledge } from "../knowledge/search";
+import { buildSystemPrompt, formatKnowledge, retrievalQuery } from "./persona";
 import { addUsage, agentModel, aiAvailable, anthropic, costOf, emptyUsage, type Usage } from "./llm";
 import type { AgentToolContext } from "./tools";
 import { runTool, toolsFor } from "./tools";
@@ -30,37 +31,7 @@ export interface AgentResult {
 /** Knowledge sources the shop allows the assistant to use (empty when retrieval is off). */
 export const ragSourcesOf = (settings: ShopSettings) => (settings.rag.enabled ? RAG_SOURCES.filter((s) => settings.rag.sources[s]) : []);
 
-/** Stable instructions first (cacheable), shop-specific text after. */
-function systemPrompt(shop: AgentShop, channel: AgentToolContext["channel"]): string {
-  const a = shop.settings.agent;
-  const sells = shop.kind === "retail" ? "products" : shop.kind === "services" ? "services by appointment" : "products and services by appointment";
-  const where =
-    channel === "instagram"
-      ? "replying to customers in Instagram direct messages"
-      : "chatting with visitors on the shop's website as a shopping and booking consultant";
-  return [
-    `You are the sales and booking assistant for "${shop.name}", ${where}. The shop sells ${sells}.`,
-    "",
-    "How to work:",
-    "- Reply in the customer's language (usually Persian). Keep messages short, warm and natural for chat - no markdown, no headings, at most a couple of short paragraphs.",
-    "- Prices, stock, services and free times come only from your tools. Never guess a number; if a tool has nothing, say so honestly.",
-    "- For policies, sizing, shipping, care and anything the shop has explained before, rely on the shop knowledge provided with the message or search_knowledge.",
-    "- Prices are in Toman. Format numbers the way the customer writes (Persian digits for Persian).",
-    "- Help the customer choose: ask one short question about their need when it helps, then recommend concrete options with a reason.",
-    "- When the customer decides to buy, create the order and send the link from the tool - address and payment happen on that page. Never ask for card numbers or send bank details yourself.",
-    "- For appointments: find the service, check today's date if they use relative dates, offer 2-4 concrete times, then book once they pick one and give their name and mobile. Send the booking link. Mention a deposit if one is due.",
-    "- Use handoff_to_human when you are unsure, for complaints, refunds, custom requests, or when the customer asks for a person.",
-    a.neverOfferDiscount ? "- Never offer or promise discounts." : "",
-    "",
-    `Tone requested by the shop: ${a.tone}`,
-    a.learnedStyle ? `\nHow this shop usually writes (learned from its past replies):\n${a.learnedStyle}` : "",
-    a.rules ? `\nShop rules (follow strictly):\n${a.rules}` : "",
-    a.knowledge ? `\nShop knowledge (policies, shipping, FAQ):\n${a.knowledge}` : "",
-    shop.settings.rag.enabled && shop.settings.rag.instructions ? `\nHow to use the shop knowledge:\n${shop.settings.rag.instructions}` : "",
-  ]
-    .filter((l) => l !== "")
-    .join("\n");
-}
+const systemPrompt = buildSystemPrompt;
 
 async function history(ctx: AgentToolContext): Promise<BetaMessageParam[]> {
   const rows = await ctx.db
@@ -92,11 +63,12 @@ async function augmentLastTurn(shop: AgentShop, ctx: AgentToolContext, msgs: Bet
   const last = msgs.at(-1)!;
   const question = typeof last.content === "string" ? last.content : "";
   const rag = shop.settings.rag;
-  const hits = rag.enabled ? await searchKnowledge(ctx.db, ctx.shopId, question, rag.topK, ctx.ragSources) : [];
+  const customerTurns = msgs.filter((m) => m.role === "user" && typeof m.content === "string").map((m) => m.content as string);
+  const hits = rag.enabled ? await searchKnowledge(ctx.db, ctx.shopId, retrievalQuery(customerTurns), rag.topK, ctx.ragSources) : [];
   const blocks: BetaContentBlockParam[] = [{ type: "text", text: question }];
   const extra = [
     pageContext ? `[Customer is currently viewing: ${pageContext}]` : "",
-    hits.length ? `[Shop knowledge that may help]\n${hits.map((h) => `- ${h.title}: ${h.content}`).join("\n")}` : "",
+    hits.length ? `[Shop knowledge that may help - turn it into a helpful recommendation, keep prices from tools]\n${formatKnowledge(hits)}` : "",
   ].filter(Boolean);
   if (extra.length) blocks.push({ type: "text", text: extra.join("\n\n") });
   msgs[msgs.length - 1] = { role: "user", content: blocks };

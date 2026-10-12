@@ -67,6 +67,25 @@ export const updateShopSettingsSchema = z.object({
     })
     .partial()
     .optional(),
+  sales: z
+    .object({
+      assistantName: z.string().max(60),
+      tonePreset: z.enum(["friendly", "formal", "energetic", "luxury", "custom"]),
+      style: z.enum(["consultative", "soft", "direct"]),
+      emoji: z.enum(["none", "few", "many"]),
+      length: z.enum(["short", "medium"]),
+      upsell: z.boolean(),
+      followUp: z.boolean(),
+      scarcity: z.boolean(),
+      greeting: z.string().max(200),
+      signOff: z.string().max(200),
+      phrases: z.array(z.string().min(1).max(80)).max(12),
+      objections: z.array(z.object({ objection: z.string().min(1).max(300), answer: z.string().min(1).max(800) })).max(10),
+      examples: z.array(z.object({ customer: z.string().min(1).max(400), reply: z.string().min(1).max(800) })).max(8),
+      trainedAt: z.string().max(40).nullable(),
+    })
+    .partial()
+    .optional(),
   rag: z
     .object({
       enabled: z.boolean(),

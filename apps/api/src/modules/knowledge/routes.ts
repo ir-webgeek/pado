@@ -6,7 +6,9 @@ import { knowledgeInputSchema } from "@shopino/shared";
 import type { Ctx } from "../../lib/context";
 import { invalidateShopCache, requireFeature, requireShop } from "../../lib/auth";
 import { notFound } from "../../lib/errors";
-import { assertAiReady } from "../agent/llm";
+import { aiAvailable, assertAiReady } from "../agent/llm";
+import { trainPersona } from "./persona-learn";
+import { buildSystemPrompt } from "../agent/persona";
 import { learnFromDms } from "./learn";
 import { searchKnowledge } from "./search";
 import { ragSourcesOf } from "../agent/agent";
@@ -65,6 +67,20 @@ export const knowledgeRoutes =
       await ctx.queues.add("knowledge.autosetup", { shopId: req.shop.id }, { jobId: `kn-${req.shop.id}-${Date.now()}` });
       return { queued: true };
     });
+    // the instructions the assistant runs with, for the owner to read
+    app.get("/:shopId/agent/prompt", { preHandler: requireShop(ctx, "admin"), schema: { params, querystring: z.object({ channel: z.enum(["instagram", "web"]).default("instagram") }) } }, async (req) => ({
+      prompt: buildSystemPrompt({ name: req.shop.name, kind: req.shop.kind, settings: req.shop.settings }, req.query.channel),
+    }));
+    // sales persona proposal from the shop's own chats and comment replies (not saved until applied)
+    app.post(
+      "/:shopId/agent/train-persona",
+      { preHandler: requireShop(ctx, "admin"), schema: { params, body: z.object({ useAi: z.boolean().default(true) }).nullish() }, config: { rateLimit: { max: 5, timeWindow: "10 minutes" } } },
+      async (req) => {
+        const useAi = req.body?.useAi ?? true;
+        if (useAi && aiAvailable()) await assertAiReady(ctx.db, req.shop.id);
+        return trainPersona(ctx.db, req.shop.id, { useAi: useAi && aiAvailable() });
+      },
+    );
     app.post("/:shopId/knowledge/learn", { preHandler: requireShop(ctx, "admin"), schema: { params }, config: { rateLimit: { max: 3, timeWindow: "10 minutes" } } }, async (req) => {
       requireFeature(req.shop, "knowledge");
       await assertAiReady(ctx.db, req.shop.id);

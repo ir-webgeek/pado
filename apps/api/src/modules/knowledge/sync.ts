@@ -22,7 +22,7 @@ const MAX_PAIRS = 120;
 
 export async function syncProductKnowledge(db: Database, shopId: string) {
   const rows = await db
-    .select({ id: products.id, title: products.title, description: products.description, category: categories.name })
+    .select({ id: products.id, title: products.title, slug: products.slug, description: products.description, category: categories.name })
     .from(products)
     .leftJoin(categories, eq(categories.id, products.categoryId))
     .where(and(eq(products.shopId, shopId), eq(products.status, "active")))
@@ -35,6 +35,7 @@ export async function syncProductKnowledge(db: Database, shopId: string) {
         .where(inArray(productVariants.productId, rows.map((r) => r.id)))
         .orderBy(asc(productVariants.position))
     : [];
+  const shop = await db.query.shops.findFirst({ where: eq(shops.id, shopId), columns: { slug: true } });
   const byProduct = new Map<string, typeof variants>();
   for (const v of variants) byProduct.set(v.productId, [...(byProduct.get(v.productId) ?? []), v]);
 
@@ -52,6 +53,7 @@ export async function syncProductKnowledge(db: Database, shopId: string) {
       ...[...options].map(([k, set]) => `${k}: ${[...set].join("، ")}`),
       vs.length ? (available ? `موجود (${available} از ${vs.length} مدل)` : "فعلا ناموجود") : "",
       p.description.slice(0, 600),
+      shop ? `لینک: ${env.PUBLIC_WEB_URL}/s/${shop.slug}/p/${encodeURIComponent(p.slug)}` : "",
     ].filter(Boolean);
     return { shopId, source: "products", ref: p.id, title: p.title.slice(0, 200), content: lines.join("\n").slice(0, 8000) };
   });

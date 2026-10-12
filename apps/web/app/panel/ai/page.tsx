@@ -9,6 +9,7 @@ import { dateTime, num } from "@/lib/format";
 import type { DictKey } from "@/lib/i18n";
 import { useI18n } from "@/lib/locale-client";
 import { useShop } from "@/lib/shop";
+import { SalesPersonaEditor, type Persona } from "@/components/sales-persona";
 
 interface Entry {
   id: string;
@@ -25,7 +26,7 @@ interface Landing {
   featuredCategorySlugs: string[];
 }
 interface ShopResp {
-  shop: { landing: Landing | null; settings: { agent: { enabled: boolean; consultOnWeb: boolean; learnedStyle: string } } };
+  shop: { landing: Landing | null; settings: { agent: { enabled: boolean; consultOnWeb: boolean; learnedStyle: string; tone: string }; sales: Persona } };
   plan: { features: string[] };
 }
 
@@ -59,6 +60,7 @@ export default function AiPage() {
         <Toggle checked={Boolean(agent?.enabled)} onChange={(v) => patchAgent({ enabled: v })} label={t("s.agentEnabled")} />
         <Toggle checked={Boolean(agent?.consultOnWeb)} onChange={(v) => patchAgent({ consultOnWeb: v })} label={t("ai.consult")} />
       </Card>
+      <SalesPersonaEditor key={shopData.shop.settings.sales.trainedAt ?? "p"} persona={shopData.shop.settings.sales} tone={agent?.tone ?? ""} onSaved={reloadShop} />
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_24rem]">
         <Knowledge />
         <div className="space-y-4">

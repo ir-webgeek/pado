@@ -124,6 +124,8 @@ export interface ShopSettings {
   invoice: { address: string; phone: string; postalCode: string; footer: string };
   /** optional USD-linked pricing: variant price = priceUsd x rate x (1 + markup), rounded */
   pricing: { usdEnabled: boolean; usdRate: number; markupPercent: number; roundTo: number; rateUpdatedAt: string | null; autoFetch: boolean };
+  /** how the assistant sells: persona, tone, sales style; trainable from the shop's own chats */
+  sales: SalesPersona;
   /** retrieval (RAG) for the assistant: which knowledge sources it may use and how it keeps them fresh */
   rag: {
     enabled: boolean;
@@ -148,6 +150,31 @@ export interface IgProfile {
   fetchedAt: string;
 }
 
+export const TONE_PRESETS = ["friendly", "formal", "energetic", "luxury", "custom"] as const;
+export const SALES_STYLES = ["consultative", "soft", "direct"] as const;
+export interface SalesPersona {
+  /** name the assistant introduces itself with ("" = speak as the shop) */
+  assistantName: string;
+  tonePreset: (typeof TONE_PRESETS)[number];
+  style: (typeof SALES_STYLES)[number];
+  emoji: "none" | "few" | "many";
+  length: "short" | "medium";
+  /** suggest one complementary in-stock item once the customer has chosen */
+  upsell: boolean;
+  /** end replies with one question that moves the sale forward */
+  followUp: boolean;
+  /** mention genuinely low stock (from the tools only) */
+  scarcity: boolean;
+  greeting: string;
+  signOff: string;
+  /** the shop's own recurring phrases */
+  phrases: string[];
+  objections: { objection: string; answer: string }[];
+  /** few-shot: how the shop actually answered (voice, not facts) */
+  examples: { customer: string; reply: string }[];
+  trainedAt: string | null;
+}
+
 export const RAG_SOURCES = ["manual", "faq", "dm_history", "products", "comments"] as const;
 export type RagSource = (typeof RAG_SOURCES)[number];
 
@@ -167,7 +194,7 @@ export const DEFAULT_SHOP_SETTINGS: ShopSettings = {
   },
   agent: {
     enabled: false,
-    tone: "friendly, short, warm; uses the customer's language",
+    tone: "",
     rules: "",
     neverOfferDiscount: true,
     knowledge: "",
@@ -179,6 +206,22 @@ export const DEFAULT_SHOP_SETTINGS: ShopSettings = {
   invoice: { address: "", phone: "", postalCode: "", footer: "" },
   alerts: { phone: "", onHandoff: true, onOrder: true, onBooking: false },
   pricing: { usdEnabled: false, usdRate: 0, markupPercent: 0, roundTo: 1000, rateUpdatedAt: null, autoFetch: false },
+  sales: {
+    assistantName: "",
+    tonePreset: "friendly",
+    style: "consultative",
+    emoji: "few",
+    length: "short",
+    upsell: true,
+    followUp: true,
+    scarcity: false,
+    greeting: "",
+    signOff: "",
+    phrases: [],
+    objections: [],
+    examples: [],
+    trainedAt: null,
+  },
   rag: {
     enabled: true,
     topK: 3,
@@ -204,6 +247,7 @@ export function resolveShopSettings(stored: PartialShopSettings | null | undefin
     invoice: { ...DEFAULT_SHOP_SETTINGS.invoice, ...s.invoice },
     alerts: { ...DEFAULT_SHOP_SETTINGS.alerts, ...s.alerts },
     pricing: { ...DEFAULT_SHOP_SETTINGS.pricing, ...s.pricing },
+    sales: { ...DEFAULT_SHOP_SETTINGS.sales, ...s.sales },
     rag: { ...DEFAULT_SHOP_SETTINGS.rag, ...s.rag, sources: { ...DEFAULT_SHOP_SETTINGS.rag.sources, ...s.rag?.sources } },
   };
 }
