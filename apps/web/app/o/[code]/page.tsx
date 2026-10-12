@@ -1,6 +1,7 @@
 "use client";
 
 import { Assistant } from "@/components/store/assistant";
+import { ReceiptPrinter } from "@/components/receipt-printer";
 import clsx from "clsx";
 import { CheckCircle2, Clock, CreditCard, Landmark, PackageCheck, Truck, Upload, Wallet, XCircle } from "lucide-react";
 import { use, useState } from "react";
@@ -72,7 +73,23 @@ function OrderLink({ code }: { code: string }) {
         #{o.code}
       </h1>
 
-      {paidFlag === "1" && <Banner ok text={t("co.paid")} />}
+      {paidFlag === "1" && o.paymentStatus === "paid" ? (
+        <ReceiptPrinter
+          data={{
+            shopName: data.shop.name,
+            code: o.code,
+            paidAt: o.timeline.find((e) => e.type === "paid")?.at,
+            items: o.items,
+            discountTotal: o.discountTotal,
+            pointsDiscount: o.pointsDiscount,
+            shippingTotal: o.shippingTotal,
+            total: o.total,
+            customer: o.address?.fullName ?? data.customer?.name,
+          }}
+        />
+      ) : (
+        paidFlag === "1" && <Banner ok text={t("co.paid")} />
+      )}
       {paidFlag === "0" && <Banner text={t("co.failed")} />}
 
       {!awaiting && o.status !== "cancelled" && o.status !== "expired" && (
@@ -157,7 +174,13 @@ function Checkout({ code, token, data, onDone }: { code: string; token: string; 
       });
       if (r.kind === "redirect") window.location.href = r.url;
       else if (r.kind === "card_to_card") setCard(r);
-      else onDone();
+      else {
+        // paid straight away (wallet or a zero total): show the printed receipt like a gateway return
+        const u = new URL(window.location.href);
+        u.searchParams.set("paid", "1");
+        window.history.replaceState(null, "", u);
+        onDone();
+      }
     } catch (err) {
       setError(err);
     } finally {

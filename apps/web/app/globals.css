@@ -233,3 +233,66 @@ textarea[dir="ltr"] {
     scrollbar-width: thin;
   }
 }
+
+/* ---- receipt printer (order thank-you) */
+@keyframes receipt-print {
+  from {
+    clip-path: inset(0 0 100% 0);
+    transform: translateY(-8px);
+  }
+  to {
+    clip-path: inset(0 0 -12px 0);
+    transform: translateY(0);
+  }
+}
+@keyframes receipt-buzz {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  50% {
+    transform: translateX(0.6px);
+  }
+}
+@keyframes receipt-led {
+  50% {
+    opacity: 0.25;
+  }
+}
+.receipt-paper {
+  /* line-by-line feed: stepped motion like a thermal printer */
+  animation: receipt-print 2.6s steps(26, end) 0.35s both;
+}
+.receipt-stage > div:first-child {
+  animation: receipt-buzz 0.09s linear 0.35s 29;
+}
+.receipt-led {
+  animation: receipt-led 0.3s linear 0.35s 9;
+}
+.receipt-zigzag {
+  background: linear-gradient(-45deg, transparent 6px, var(--bg) 0) 0 0 / 12px 12px repeat-x,
+    linear-gradient(45deg, transparent 6px, var(--bg) 0) 0 0 / 12px 12px repeat-x;
+  transform: translateY(6px);
+}
+@media (prefers-reduced-motion: reduce) {
+  .receipt-paper,
+  .receipt-stage > div:first-child,
+  .receipt-led {
+    animation: none;
+  }
+}
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  .receipt-paper,
+  .receipt-paper * {
+    visibility: visible;
+  }
+  .receipt-paper {
+    position: absolute;
+    inset: 0 0 auto 0;
+    animation: none;
+    box-shadow: none;
+  }
+}

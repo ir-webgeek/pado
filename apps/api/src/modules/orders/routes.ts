@@ -1,7 +1,7 @@
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
 import { and, desc, eq, ilike, or, sql } from "drizzle-orm";
 import { z } from "zod";
-import { customers, orders, payments } from "@shopino/db";
+import { appointments, customers, orders, payments } from "@shopino/db";
 import { ORDER_STATUSES, createOrderSchema, orderStatusUpdateSchema } from "@shopino/shared";
 import type { Ctx } from "../../lib/context";
 import { requireShop } from "../../lib/auth";
@@ -101,13 +101,32 @@ export const orderRoutes =
     });
 
     // ---- payments needing review (card-to-card receipts)
-    app.get("/:shopId/payments/pending", { preHandler: requireShop(ctx, "staff"), schema: { params } }, async (req) =>
-      ctx.db
-        .select()
+    // with what was paid for, so the reviewer can check the amount against the order or booking
+    app.get("/:shopId/payments/pending", { preHandler: requireShop(ctx, "staff"), schema: { params } }, async (req) => {
+      const rows = await ctx.db
+        .select({
+          id: payments.id,
+          amount: payments.amount,
+          receiptUrl: payments.receiptUrl,
+          createdAt: payments.createdAt,
+          orderId: payments.orderId,
+          appointmentId: payments.appointmentId,
+          orderCode: orders.code,
+          orderTotal: orders.total,
+          orderName: sql<string | null>`${orders.address}->>'fullName'`,
+          bookingCode: appointments.code,
+          bookingDue: sql<number | null>`case when ${appointments.depositAmount} > 0 then ${appointments.depositAmount} else ${appointments.price} - ${appointments.discountTotal} end`,
+          customerName: customers.name,
+          customerPhone: customers.phone,
+        })
         .from(payments)
+        .leftJoin(orders, eq(orders.id, payments.orderId))
+        .leftJoin(appointments, eq(appointments.id, payments.appointmentId))
+        .leftJoin(customers, sql`${customers.id} = coalesce(${orders.customerId}, ${appointments.customerId})`)
         .where(and(eq(payments.shopId, req.shop.id), eq(payments.status, "pending_review")))
-        .orderBy(desc(payments.createdAt)),
-    );
+        .orderBy(desc(payments.createdAt));
+      return rows.map((r) => ({ ...r, expected: r.orderTotal ?? r.bookingDue, matches: (r.orderTotal ?? r.bookingDue) === r.amount }));
+    });
     app.post(
       "/:shopId/payments/:id/review",
       { preHandler: requireShop(ctx, "admin"), schema: { params: withId, body: z.object({ approve: z.boolean() }) } },

@@ -1,5 +1,6 @@
 "use client";
 
+import clsx from "clsx";
 import { Package, Search } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -33,6 +34,8 @@ function Orders() {
   const query = new URLSearchParams({ limit: "50", ...(tab !== "all" && tab !== "receipts" ? { status: tab } : {}), ...(q ? { q } : {}) });
   const { data, mutate } = useApi<{ items: OrderRow[]; counts: Record<string, number> }>(tab === "receipts" ? null : `/shops/${shop.id}/orders?${query}`);
   const counts = data?.counts ?? {};
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [bulkBusy, setBulkBusy] = useState(false);
   const total = Object.values(counts).reduce((a, b) => a + b, 0);
 
   const next: Record<string, { to: string; label: DictKey }> = {
@@ -63,6 +66,31 @@ function Orders() {
         )}
       </div>
 
+      {picked.size > 0 && data && (
+        <div className="sticky top-2 z-20 mb-3 flex flex-wrap items-center gap-2 rounded-2xl border border-gold/40 bg-[var(--bg-elev)] px-4 py-2 shadow-lg">
+          <span className="text-sm strong">{t("ob.selected").replace("{n}", num(picked.size, locale))}</span>
+          <Button
+            size="sm"
+            variant="primary"
+            loading={bulkBusy}
+            onClick={async () => {
+              setBulkBusy(true);
+              try {
+                for (const o of data.items.filter((x) => picked.has(x.id) && next[x.status])) {
+                  await api(`/shops/${shop.id}/orders/${o.id}/status`, { method: "POST", json: { status: next[o.status]!.to } }).catch(() => undefined);
+                }
+                setPicked(new Set());
+                await mutate();
+              } finally {
+                setBulkBusy(false);
+              }
+            }}
+          >
+            {t("ob.advance")}
+          </Button>
+          <Button size="sm" variant="ghost" onClick={() => setPicked(new Set())}>{t("a.cancel")}</Button>
+        </div>
+      )}
       {tab === "receipts" ? (
         <Receipts />
       ) : !data ? (
@@ -76,9 +104,24 @@ function Orders() {
           {data.items.map((o) => (
             <Card key={o.id} className="flex flex-col gap-3 !p-4">
               <div className="flex items-start justify-between gap-2">
-                <Link href={`/panel/orders/${o.id}`} className="num font-semibold strong" dir="ltr">
-                  #{o.code}
-                </Link>
+                <label className="flex items-center gap-2">
+                  {next[o.status] && (
+                    <input
+                      type="checkbox"
+                      aria-label={o.code}
+                      checked={picked.has(o.id)}
+                      onChange={(e) => {
+                        const n = new Set(picked);
+                        if (e.target.checked) n.add(o.id);
+                        else n.delete(o.id);
+                        setPicked(n);
+                      }}
+                    />
+                  )}
+                  <Link href={`/panel/orders/${o.id}`} className="num font-semibold strong" dir="ltr">
+                    #{o.code}
+                  </Link>
+                </label>
                 <Badge tone={statusTone(o.status)}>{t(`st.${o.status}` as DictKey)}</Badge>
               </div>
               <p className="-mt-2 text-[11px] muted">
@@ -132,36 +175,82 @@ function Orders() {
   );
 }
 
+interface PendingReceipt {
+  id: string;
+  amount: number;
+  receiptUrl: string | null;
+  createdAt: string;
+  orderId: string | null;
+  appointmentId: string | null;
+  orderCode: string | null;
+  bookingCode: string | null;
+  orderName: string | null;
+  customerName: string | null;
+  customerPhone: string | null;
+  expected: number | null;
+  matches: boolean;
+}
+
+/** Card-to-card receipts waiting for a person: what they are for, whether the amount matches, approve or reject. */
 function Receipts() {
   const { t, locale } = useI18n();
   const { shop } = useShop();
-  const { data, mutate } = useApi<{ id: string; amount: number; receiptUrl: string | null; createdAt: string; orderId: string | null; appointmentId: string | null }[]>(`/shops/${shop.id}/payments/pending`);
+  const { data, mutate } = useApi<PendingReceipt[]>(`/shops/${shop.id}/payments/pending`);
+  const [zoom, setZoom] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
   if (!data) return <Spinner />;
-  if (!data.length) return <Card><Empty title={t("o.empty")} /></Card>;
+  if (!data.length) return <Card><Empty title={t("rcq.empty")} /></Card>;
   const review = async (id: string, approve: boolean) => {
-    await api(`/shops/${shop.id}/payments/${id}/review`, { method: "POST", json: { approve } });
-    mutate();
+    if (!approve && !confirm(t("rcq.rejectConfirm"))) return;
+    setBusy(id);
+    try {
+      await api(`/shops/${shop.id}/payments/${id}/review`, { method: "POST", json: { approve } });
+      await mutate();
+    } finally {
+      setBusy(null);
+    }
   };
   return (
-    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-      {data.map((p) => (
-        <Card key={p.id} className="space-y-3">
-          {p.receiptUrl && (
-            <a href={p.receiptUrl} target="_blank" rel="noreferrer">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={p.receiptUrl} alt="receipt" className="h-48 w-full rounded-xl object-cover" />
-            </a>
-          )}
-          <div className="flex items-center justify-between">
-            <span className="num font-bold strong">{money(p.amount, locale)}</span>
-            <span className="text-xs muted">{dateTime(p.createdAt, locale)}</span>
-          </div>
-          <div className="flex gap-2">
-            <Button variant="primary" className="flex-1" onClick={() => review(p.id, true)}>{t("a.approve")}</Button>
-            <Button variant="danger" onClick={() => review(p.id, false)}>{t("a.reject")}</Button>
-          </div>
-        </Card>
-      ))}
-    </div>
+    <>
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+        {data.map((p) => (
+          <Card key={p.id} className="space-y-3">
+            {p.receiptUrl && (
+              <button type="button" className="block w-full" onClick={() => setZoom(p.receiptUrl)}>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={p.receiptUrl} alt={t("rcq.receipt")} className="h-48 w-full rounded-xl object-cover transition hover:opacity-90" loading="lazy" />
+              </button>
+            )}
+            <div className="flex items-center justify-between gap-2">
+              {p.orderId ? (
+                <Link href={`/panel/orders/${p.orderId}`} className="num text-sm font-semibold strong" dir="ltr">#{p.orderCode}</Link>
+              ) : (
+                <span className="num text-sm font-semibold strong" dir="ltr">#{p.bookingCode}</span>
+              )}
+              <span className="text-xs muted">{dateTime(p.createdAt, locale)}</span>
+            </div>
+            <p className="text-sm">
+              {p.customerName ?? p.orderName ?? "—"} <span className="num text-xs muted" dir="ltr">{p.customerPhone ?? ""}</span>
+            </p>
+            <div className={clsx("flex items-center justify-between rounded-xl px-3 py-2 text-sm", p.matches ? "bg-success/10" : "bg-warning/10")}>
+              <span className="num font-bold strong">{money(p.amount, locale)}</span>
+              <span className={clsx("text-xs", p.matches ? "text-success" : "text-warning")}>
+                {p.matches ? `✓ ${t("rcq.matches")}` : `${t("rcq.expected")} ${p.expected != null ? money(p.expected, locale) : "-"}`}
+              </span>
+            </div>
+            <div className="flex gap-2">
+              <Button variant="primary" className="flex-1" loading={busy === p.id} onClick={() => review(p.id, true)}>{t("a.approve")}</Button>
+              <Button variant="danger" disabled={busy === p.id} onClick={() => review(p.id, false)}>{t("a.reject")}</Button>
+            </div>
+          </Card>
+        ))}
+      </div>
+      {zoom && (
+        <button type="button" className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4" onClick={() => setZoom(null)} aria-label="close">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={zoom} alt={t("rcq.receipt")} className="max-h-full max-w-full rounded-xl" />
+        </button>
+      )}
+    </>
   );
 }
