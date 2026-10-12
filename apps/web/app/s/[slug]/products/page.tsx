@@ -4,9 +4,10 @@ import clsx from "clsx";
 import { ImageOff, SlidersHorizontal, X } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense, use, useMemo, useState } from "react";
+import { Suspense, use, useEffect, useMemo, useRef, useState } from "react";
+import useSWRInfinite from "swr/infinite";
 import { Spinner } from "@/components/ui";
-import { useApi } from "@/lib/api";
+import { api, useApi } from "@/lib/api";
 import { money } from "@/lib/format";
 import { useI18n } from "@/lib/locale-client";
 import { Thumb } from "@/components/thumb";
@@ -21,6 +22,7 @@ interface Item {
   available: number;
 }
 const SORTS = ["new", "popular", "price_asc", "price_desc"] as const;
+const PAGE = 24;
 const RESERVED = new Set(["category", "q", "minPrice", "maxPrice", "inStock", "sort", "limit", "offset"]);
 
 /** Product listing page with URL-driven filters (shareable, back-button friendly). */
@@ -41,7 +43,23 @@ function Plp({ slug }: { slug: string }) {
   const { data: facets } = useApi<{ attributes: Record<string, string[]>; price: { min: number; max: number } | null }>(`/public/shops/${slug}/facets`);
   const { data: shop } = useApi<{ categories: { id: string; name: string; slug: string }[] }>(`/public/shops/${slug}`);
   const query = sp.toString();
-  const { data } = useApi<{ items: Item[] }>(`/public/shops/${slug}/products?limit=60&${query}`);
+  // pages of PAGE items, the next one loads when the end of the grid scrolls into view
+  const { data: pages, size, setSize, isValidating } = useSWRInfinite<{ items: Item[] }>(
+    (i, prev: { items: Item[] } | null) => (prev && prev.items.length < PAGE ? null : `/public/shops/${slug}/products?limit=${PAGE}&offset=${i * PAGE}&${query}`),
+    (path: string) => api<{ items: Item[] }>(path),
+    { revalidateFirstPage: false },
+  );
+  const data = pages ? { items: pages.flatMap((p) => p.items) } : undefined;
+  const hasMore = (pages?.at(-1)?.items.length ?? 0) === PAGE;
+  const loadingMore = isValidating && size > (pages?.length ?? 0);
+  const sentinel = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = sentinel.current;
+    if (!el || !hasMore) return;
+    const io = new IntersectionObserver(([e]) => e?.isIntersecting && void setSize((n) => n + 1), { rootMargin: "600px" });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [hasMore, setSize, pages?.length]);
 
   const set = (k: string, v: string | null) => {
     const next = new URLSearchParams(sp.toString());
@@ -150,6 +168,17 @@ function Plp({ slug }: { slug: string }) {
                 </p>
               </Link>
             ))}
+          </div>
+        )}
+        {data && hasMore && (
+          <div ref={sentinel} className="flex justify-center py-6">
+            {loadingMore ? (
+              <Spinner />
+            ) : (
+              <button className="rounded-full border border-[var(--border-strong)] px-5 py-2 text-sm strong hover:bg-[var(--surface-sunken)]" onClick={() => void setSize(size + 1)}>
+                {t("sf.loadMore")}
+              </button>
+            )}
           </div>
         )}
       </div>
