@@ -41,6 +41,7 @@ const HANDOFF_REASONS: Record<string, string> = {
   "agent could not produce a reply": "ایجنت نتوانست پاسخ بدهد",
   "assistant declined to answer": "ایجنت پاسخ را به انسان سپرد",
   automation: "پاسخ خودکار گفتگو را به شما سپرد",
+  "voice message": "پیام صوتی فرستاده است",
 };
 
 /** One SMS per conversation per 30 minutes, so a chatty customer does not flood the manager. */

@@ -25,7 +25,7 @@ interface Settings {
     customerReschedule: boolean;
     refundToWallet: boolean;
   };
-  agent: { enabled: boolean; tone: string; rules: string; neverOfferDiscount: boolean; knowledge: string; consultOnWeb: boolean };
+  agent: { enabled: boolean; tone: string; rules: string; neverOfferDiscount: boolean; knowledge: string; consultOnWeb: boolean; voiceReply: string };
   cardToCard: { cardNumber: string; holder: string; bank: string };
   invoice: { address: string; phone: string; postalCode: string; footer: string };
   alerts: { phone: string; onHandoff: boolean; onOrder: boolean; onBooking: boolean };
@@ -191,6 +191,9 @@ function SettingsForm({ tab, data, onSaved }: { tab: Tab; data: ShopResp; onSave
           </Field>
           <Field label={t("s.knowledge")}>
             <Textarea className="min-h-40" value={agent.knowledge} onChange={(e) => setAgent({ ...agent, knowledge: e.target.value })} />
+          </Field>
+          <Field label={t("s.voiceReply")} hint={t("s.voiceReplyHint")}>
+            <Textarea maxLength={500} value={agent.voiceReply} onChange={(e) => setAgent({ ...agent, voiceReply: e.target.value })} />
           </Field>
         </>
       )}

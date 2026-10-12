@@ -114,6 +114,8 @@ export interface ShopSettings {
     consultOnWeb: boolean;
     /** style guide distilled from past human replies (learn-from-DMs) */
     learnedStyle: string;
+    /** sent when a customer sends a voice message (the chat is flagged for a person); empty = no reply */
+    voiceReply: string;
   };
   cardToCard: { cardNumber: string; holder: string; bank: string };
   /** SMS alerts to the shop manager */
@@ -161,6 +163,7 @@ export const DEFAULT_SHOP_SETTINGS: ShopSettings = {
     knowledge: "",
     consultOnWeb: false,
     learnedStyle: "",
+    voiceReply: "پیام صوتی شما رسید 🙏 همکاران ما گوش می‌دهند و به‌زودی پاسخ می‌دهند. اگر عجله دارید، لطفا پیامتان را بنویسید.",
   },
   cardToCard: { cardNumber: "", holder: "", bank: "" },
   invoice: { address: "", phone: "", postalCode: "", footer: "" },

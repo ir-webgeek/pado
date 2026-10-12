@@ -129,6 +129,26 @@ export async function handleInbound(db: Database, queues: Queues, redis: Redis, 
     }
   }
 
+  // ---- voice message: the assistant cannot listen, so a person takes it; the customer gets an acknowledgment
+  const isVoice = !msg.text.trim() && (msg.attachments?.some((a) => a.type === "audio") ?? false);
+  if (isVoice) {
+    const current = await db.query.conversations.findFirst({ where: eq(conversations.id, conv!.id) });
+    const ack = settings.agent.voiceReply.trim();
+    let sent: string | null = null;
+    if (ack && current?.mode === "agent") {
+      try {
+        const ids = await deliver(shop, msg.channel, msg.externalUserId, ack);
+        await db.insert(messages).values({ shopId: shop.id, conversationId: conv!.id, direction: "out", sender: "agent", text: ack, externalId: ids[0] });
+        sent = ack;
+      } catch {
+        // delivery problems surface in the inbox; the handoff below still alerts the team
+      }
+    }
+    await db.update(conversations).set({ needsHuman: true, lastMessageAt: new Date() }).where(eq(conversations.id, conv!.id));
+    await queues.add("notify.handoff", { conversationId: conv!.id, reason: "voice message" });
+    return { reply: sent, handoff: "voice message" };
+  }
+
   // ---- AI agent
   const fresh = await db.query.conversations.findFirst({ where: eq(conversations.id, conv!.id) });
   const agentOn = fresh!.mode === "agent" && settings.agent.enabled && planHas(shop.plan, "agent") && agentAvailable();

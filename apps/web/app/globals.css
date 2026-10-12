@@ -101,6 +101,11 @@ body {
   min-height: 100dvh;
   font-feature-settings: "ss01";
 }
+/* keys, URLs, SHEBA and codes typed left-to-right: show the digits that are actually stored */
+input[dir="ltr"],
+textarea[dir="ltr"] {
+  font-feature-settings: normal;
+}
 ::selection {
   background: var(--accent);
   color: var(--accent-ink);

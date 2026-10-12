@@ -63,6 +63,7 @@ export const updateShopSettingsSchema = z.object({
       knowledge: z.string().max(20000),
       consultOnWeb: z.boolean(),
       learnedStyle: z.string().max(6000),
+      voiceReply: z.string().max(500),
     })
     .partial()
     .optional(),
