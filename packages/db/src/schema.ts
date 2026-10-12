@@ -19,6 +19,8 @@ import {
   APPOINTMENT_STATUSES,
   CONVERSATION_MODES,
   CUSTOMER_SEGMENTS,
+  FA_FOLD_FROM,
+  FA_FOLD_TO,
   MEMBER_ROLES,
   ORDER_STATUSES,
   PAYMENT_METHODS,
@@ -30,6 +32,9 @@ import {
 } from "@shopino/shared";
 
 // Column names are mapped camelCase -> snake_case by the `casing` option on the client and drizzle-kit.
+
+/** Same folding as the API's Persian search, as SQL; constants inline so expression indexes match queries. */
+const faFoldSql = (col: unknown) => sql`lower(translate(${col}, ${sql.raw(`'${FA_FOLD_FROM}'`)}, ${sql.raw(`'${FA_FOLD_TO}'`)}))`;
 
 const money = (name?: string) => (name ? bigint(name, { mode: "number" }) : bigint({ mode: "number" }));
 const id = () => uuid().primaryKey().defaultRandom();
@@ -434,6 +439,7 @@ export const products = pgTable(
     uniqueIndex().on(t.shopId, t.slug),
     index().on(t.shopId, t.status, t.createdAt),
     index("products_title_trgm").using("gin", sql`${t.title} gin_trgm_ops`),
+    index("products_title_fa_trgm").using("gin", sql`${faFoldSql(t.title)} gin_trgm_ops`),
   ],
 );
 
@@ -621,6 +627,7 @@ export const customers = pgTable(
     uniqueIndex().on(t.shopId, t.instagramId),
     index().on(t.shopId, t.segment),
     index().on(t.shopId, t.lastOrderAt),
+    index("customers_name_fa_trgm").using("gin", sql`${faFoldSql(t.name)} gin_trgm_ops`),
     check("customer_wallet_non_negative", sql`${t.walletBalance} >= 0`),
   ],
 );
@@ -734,6 +741,10 @@ export const orders = pgTable(
     index().on(t.shopId, t.createdAt),
     index().on(t.customerId),
     index().on(t.reservedUntil).where(sql`${t.status} = 'awaiting_payment'`),
+    // revenue by period (dashboard, reports) reads only paid orders
+    index("orders_shop_paid_at").on(t.shopId, t.paidAt).where(sql`${t.paymentStatus} = 'paid'`),
+    // orders a chat led to (inbox thread)
+    index("orders_conversation").on(t.conversationId).where(sql`${t.conversationId} IS NOT NULL`),
   ],
 );
 
@@ -933,6 +944,8 @@ export const appointments = pgTable(
     index().on(t.shopId, t.startsAt),
     index().on(t.staffId, t.blockStart, t.blockEnd),
     index().on(t.customerId, t.startsAt),
+    index("appointments_shop_completed_at").on(t.shopId, t.completedAt).where(sql`${t.status} = 'completed'`),
+    index("appointments_conversation").on(t.conversationId).where(sql`${t.conversationId} IS NOT NULL`),
     check("appointment_range", sql`${t.endsAt} > ${t.startsAt} AND ${t.blockEnd} >= ${t.endsAt} AND ${t.blockStart} <= ${t.startsAt}`),
   ],
 );

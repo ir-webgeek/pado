@@ -3,7 +3,7 @@
 import { build } from "esbuild";
 
 await build({
-  entryPoints: ["src/server.ts", "src/worker.ts", "src/migrate.ts"],
+  entryPoints: ["src/server.ts", "src/worker.ts", "src/migrate.ts", "src/backfill-images.ts"],
   outdir: "dist",
   bundle: true,
   platform: "node",

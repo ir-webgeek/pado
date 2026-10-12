@@ -8,6 +8,7 @@ import { api } from "@/lib/api";
 import { money, num } from "@/lib/format";
 import { useI18n } from "@/lib/locale-client";
 import { getDmRef } from "@/components/dm-ref";
+import { Thumb } from "@/components/thumb";
 
 export interface CartLine {
   variantId: string;
@@ -120,7 +121,7 @@ function CartDrawer({ slug }: { slug: string }) {
           {lines.map((l) => (
             <div key={l.variantId} className="flex gap-3">
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              {l.image ? <img src={l.image} alt="" className="size-16 rounded-xl object-cover" /> : <div className="size-16 rounded-xl bg-[var(--surface-sunken)]" />}
+              {l.image ? <Thumb src={l.image} className="size-16 rounded-xl object-cover" /> : <div className="size-16 rounded-xl bg-[var(--surface-sunken)]" />}
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-medium strong">{l.title}</p>
                 {l.label && <p className="text-xs muted">{l.label}</p>}

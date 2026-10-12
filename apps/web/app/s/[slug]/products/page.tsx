@@ -9,6 +9,7 @@ import { Spinner } from "@/components/ui";
 import { useApi } from "@/lib/api";
 import { money } from "@/lib/format";
 import { useI18n } from "@/lib/locale-client";
+import { Thumb } from "@/components/thumb";
 
 interface Item {
   id: string;
@@ -134,7 +135,7 @@ function Plp({ slug }: { slug: string }) {
                 <div className="relative aspect-[4/5] overflow-hidden rounded-2xl bg-[var(--surface-sunken)]">
                   {p.images[0] ? (
                     // eslint-disable-next-line @next/next/no-img-element
-                    <img src={p.images[0]} alt={p.title} loading="lazy" className="size-full object-cover transition duration-500 group-hover:scale-105" />
+                    <Thumb src={p.images[0]} alt={p.title} loading="lazy" className="size-full object-cover transition duration-500 group-hover:scale-105" />
                   ) : (
                     <div className="flex size-full items-center justify-center muted">
                       <ImageOff className="size-6" />

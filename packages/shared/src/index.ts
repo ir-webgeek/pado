@@ -5,3 +5,4 @@ export * from "./time";
 export * from "./codes";
 export * from "./schemas";
 export * from "./permissions";
+export * from "./fa-fold";

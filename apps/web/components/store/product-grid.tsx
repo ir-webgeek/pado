@@ -2,6 +2,7 @@ import Link from "next/link";
 import { ImageOff } from "lucide-react";
 import { money } from "@/lib/format";
 import type { PublicProduct } from "@/lib/server-api";
+import { Thumb } from "@/components/thumb";
 
 export function ProductGrid({ slug, items, locale, soldOut }: { slug: string; items: PublicProduct[]; locale: "fa" | "en"; soldOut: string }) {
   return (
@@ -11,7 +12,7 @@ export function ProductGrid({ slug, items, locale, soldOut }: { slug: string; it
           <div className="aspect-[4/5] overflow-hidden rounded-2xl bg-[var(--surface-sunken)]">
             {p.images[0] ? (
               // eslint-disable-next-line @next/next/no-img-element
-              <img src={p.images[0]} alt={p.title} loading="lazy" className="size-full object-cover transition duration-500 group-hover:scale-105" />
+              <Thumb src={p.images[0]} alt={p.title} loading="lazy" className="size-full object-cover transition duration-500 group-hover:scale-105" />
             ) : (
               <div className="flex size-full items-center justify-center muted">
                 <ImageOff className="size-6" />

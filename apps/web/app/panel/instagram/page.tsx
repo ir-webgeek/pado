@@ -9,6 +9,7 @@ import { latinDigits, money, num } from "@/lib/format";
 import { useI18n } from "@/lib/locale-client";
 import { useShop } from "@/lib/shop";
 import { InstagramAccount } from "@/components/instagram-account";
+import { Thumb } from "@/components/thumb";
 
 interface Extracted {
   isProduct: boolean;
@@ -121,7 +122,7 @@ function InstagramImport() {
             return (
               <Card key={m.id} className="flex flex-col gap-2 !p-0 overflow-hidden">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                {img ? <img src={img} alt="" className="aspect-square w-full object-cover" loading="lazy" /> : <div className="aspect-square bg-[var(--surface-sunken)]" />}
+                {img ? <Thumb src={img} className="aspect-square w-full object-cover" loading="lazy" /> : <div className="aspect-square bg-[var(--surface-sunken)]" />}
                 <div className="flex flex-1 flex-col gap-2 p-3">
                   {x ? (
                     <>
@@ -219,7 +220,7 @@ function ImportModal({ media, onClose, onDone }: { media: Media; onClose: () => 
         <div className="flex gap-2 overflow-x-auto">
           {images.map((u) => (
             // eslint-disable-next-line @next/next/no-img-element
-            <img key={u} src={u} alt="" className="size-24 shrink-0 rounded-xl object-cover" />
+            <Thumb key={u} src={u} className="size-24 shrink-0 rounded-xl object-cover" />
           ))}
         </div>
         <div className="grid gap-3 sm:grid-cols-3">

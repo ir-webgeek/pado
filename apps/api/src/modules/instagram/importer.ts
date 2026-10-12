@@ -1,16 +1,15 @@
 import { and, eq, inArray } from "drizzle-orm";
 import { randomBytes } from "node:crypto";
-import { mkdir, writeFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { z } from "zod";
 import { categories, igMedia, shops, type Database, type ExtractedProduct } from "@shopino/db";
 import type { ProductInput } from "@shopino/shared";
-import { env, publicApiUrl } from "../../config";
 import type { ShopCtx } from "../../lib/auth";
 import { badRequest, notFound } from "../../lib/errors";
 import { chargeAi, structured } from "../agent/llm";
 import { slugify, upsertProduct } from "../catalog/service";
 import { assertPublicHttpsUrl } from "../../lib/safe-url";
+import { storeFile } from "../../lib/uploads";
 import { listMedia, type IgAccount } from "./client";
 
 /** Pull the latest posts and reels into ig_media (idempotent on media id). */
@@ -111,13 +110,8 @@ export async function copyImage(url: string, shopId: string, folder = "ig"): Pro
     const res = await fetch(url, { signal: AbortSignal.timeout(20_000), redirect: "error" });
     const type = res.headers.get("content-type") ?? "";
     if (!res.ok || !type.startsWith("image/")) return null;
-    const ext = type.includes("png") ? ".png" : type.includes("webp") ? ".webp" : ".jpg";
-    const rel = join("shops", shopId, folder);
-    const dir = resolve(env.UPLOAD_DIR, rel);
-    await mkdir(dir, { recursive: true });
-    const name = `${randomBytes(10).toString("hex")}${ext}`;
-    await writeFile(join(dir, name), Buffer.from(await res.arrayBuffer()));
-    return `${publicApiUrl()}/uploads/${rel.split("\\").join("/")}/${name}`;
+    const mime = type.includes("png") ? "image/png" : type.includes("webp") ? "image/webp" : "image/jpeg";
+    return await storeFile(Buffer.from(await res.arrayBuffer()), mime, join("shops", shopId, folder));
   } catch {
     return null;
   }

@@ -10,6 +10,7 @@ import type { DictKey } from "@/lib/i18n";
 import { useI18n } from "@/lib/locale-client";
 import { useShop } from "@/lib/shop";
 import type { Product } from "@/lib/types";
+import { Thumb } from "@/components/thumb";
 
 interface VariantDraft {
   id?: string;
@@ -79,7 +80,7 @@ export default function ProductsPage() {
                 <div className="aspect-square bg-[var(--surface-sunken)]">
                   {p.images[0] ? (
                     // eslint-disable-next-line @next/next/no-img-element
-                    <img src={p.images[0]} alt={p.title} className="size-full object-cover" loading="lazy" />
+                    <Thumb src={p.images[0]} alt={p.title} className="size-full object-cover" loading="lazy" />
                   ) : (
                     <div className="flex size-full items-center justify-center muted">
                       <ImageOff className="size-6" />
@@ -198,7 +199,7 @@ function ProductEditor({ product, onClose, onSaved }: { product: Product | null;
             {images.map((src, i) => (
               <span key={src} className="group relative">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={src} alt="" className="size-20 rounded-xl object-cover" />
+                <Thumb src={src} className="size-20 rounded-xl object-cover" />
                 <button onClick={() => setImages((im) => im.filter((_, j) => j !== i))} className="absolute -end-1.5 -top-1.5 hidden rounded-full bg-danger p-1 text-white group-hover:block">
                   <Trash2 className="size-3" />
                 </button>
