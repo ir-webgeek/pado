@@ -5,30 +5,32 @@
 export const PLAN_IDS = ["free", "starter", "lite", "pro", "promax", "luxury"] as const;
 export type PlanId = (typeof PLAN_IDS)[number];
 
-export type PlanFeature =
-  | "agent"
-  | "agent_voice"
-  | "agent_training"
-  | "auto_print"
-  | "card_sms_match"
-  | "usd_pricing"
-  | "custom_domain"
-  | "torob"
-  | "seo_tools"
-  | "pos"
-  | "shop_email"
-  | "seo_ai"
-  | "priority_support"
-  | "appointments"
-  | "appointment_deposits"
-  | "appointment_reminders"
-  | "multi_staff"
-  | "automations"
-  | "forms"
-  | "ai_consult"
-  | "knowledge"
-  | "ig_import"
-  | "landing_ai";
+export const PLAN_FEATURES = [
+  "agent",
+  "agent_voice",
+  "agent_training",
+  "auto_print",
+  "card_sms_match",
+  "usd_pricing",
+  "custom_domain",
+  "torob",
+  "seo_tools",
+  "pos",
+  "shop_email",
+  "seo_ai",
+  "priority_support",
+  "appointments",
+  "appointment_deposits",
+  "appointment_reminders",
+  "multi_staff",
+  "automations",
+  "forms",
+  "ai_consult",
+  "knowledge",
+  "ig_import",
+  "landing_ai",
+] as const;
+export type PlanFeature = (typeof PLAN_FEATURES)[number];
 
 export interface Plan {
   id: PlanId;
@@ -140,4 +142,24 @@ export const PLANS: Record<PlanId, Plan> = {
 
 export function planHas(plan: PlanId, feature: PlanFeature): boolean {
   return PLANS[plan].features.includes(feature);
+}
+
+/** Prices, limits and features as shipped; the super admin's overrides are applied on top. */
+export const DEFAULT_PLANS: Record<PlanId, Plan> = JSON.parse(JSON.stringify(PLANS));
+
+export type PlanOverride = Partial<Pick<Plan, "monthly" | "yearlyPerMonth" | "aiGiftCredit" | "features" | "recommended">> & { limits?: Partial<Plan["limits"]> };
+
+/** Replace the live plan table (in place, so every importer sees it) with defaults + overrides. */
+export function applyPlanOverrides(overrides: Partial<Record<PlanId, PlanOverride>>) {
+  for (const id of PLAN_IDS) {
+    const d = DEFAULT_PLANS[id];
+    const o = overrides[id] ?? {};
+    PLANS[id] = {
+      ...d,
+      ...o,
+      id,
+      limits: { ...d.limits, ...o.limits },
+      features: o.features ? o.features.filter((f): f is PlanFeature => (PLAN_FEATURES as readonly string[]).includes(f)) : [...d.features],
+    };
+  }
 }

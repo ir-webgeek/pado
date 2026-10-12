@@ -4,10 +4,11 @@ import clsx from "clsx";
 import { Check } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
-import { PLANS, PLAN_IDS, type PlanFeature } from "@shopino/shared";
+import { PLANS as DEFAULT_PLANS, PLAN_IDS, type Plan, type PlanFeature, type PlanId } from "@shopino/shared";
+import { useApi } from "@/lib/api";
 import { useI18n } from "@/lib/locale-client";
 
-const featureLabels: Partial<Record<PlanFeature, { fa: string; en: string }>> = {
+export const featureLabels: Partial<Record<PlanFeature, { fa: string; en: string }>> = {
   appointments: { fa: "نوبت‌دهی آنلاین و تقویم پرسنل", en: "Online booking & staff calendar" },
   appointment_reminders: { fa: "یادآوری پیامکی نوبت", en: "SMS booking reminders" },
   agent: { fa: "ایجنت فروش و رزرو در دایرکت", en: "Sales & booking agent in DMs" },
@@ -29,7 +30,7 @@ const featureLabels: Partial<Record<PlanFeature, { fa: string; en: string }>> = 
   ig_import: { fa: "ساخت محصول از پست‌های اینستاگرام", en: "Products from Instagram posts" },
 };
 
-const names = {
+export const planNames: Record<PlanId, { fa: string; en: string }> = {
   free: { fa: "رایگان", en: "Free" },
   starter: { fa: "استارتر", en: "Starter" },
   lite: { fa: "لایت", en: "Lite" },
@@ -41,6 +42,9 @@ const names = {
 export function PricingCards() {
   const { t, locale } = useI18n();
   const [yearly, setYearly] = useState(false);
+  // live prices/limits after the platform admin's edits; the shipped table until they load
+  const { data } = useApi<{ plans: Plan[] }>("/platform/plans", { revalidateOnFocus: false });
+  const PLANS = data ? (Object.fromEntries(data.plans.map((p) => [p.id, p])) as Record<PlanId, Plan>) : DEFAULT_PLANS;
   const fmt = (n: number) => new Intl.NumberFormat(locale === "fa" ? "fa-IR" : "en-US").format(n);
   const lim = (v: number | null) => (v === null ? t("pricing.unlimited") : fmt(v));
 
@@ -70,12 +74,12 @@ export function PricingCards() {
           return (
             <div key={id} className={clsx("card relative flex flex-col p-5", p.recommended && "border-gold/50 shadow-[0_0_0_1px_rgb(61_219_196/.3),0_24px_60px_-24px_rgb(61_219_196/.35)]")}>
               {p.recommended && <span className="absolute -top-3 start-5 rounded-full bg-[var(--accent)] px-3 py-0.5 text-xs font-medium text-[var(--accent-ink)]">{t("pricing.recommended")}</span>}
-              <h3 className="text-lg font-bold strong">{names[id][locale]}</h3>
+              <h3 className="text-lg font-bold strong">{planNames[id][locale]}</h3>
               <div className="mt-3 min-h-16">
                 {price === null ? (
                   <p className="text-2xl font-bold strong">{t("pricing.custom")}</p>
                 ) : price === 0 ? (
-                  <p className="text-3xl font-extrabold strong">{names.free[locale]}</p>
+                  <p className="text-3xl font-extrabold strong">{planNames.free[locale]}</p>
                 ) : (
                   <p>
                     <span className="num text-3xl font-extrabold strong">{fmt(price / 1000)}</span>

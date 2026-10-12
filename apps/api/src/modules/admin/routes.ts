@@ -17,14 +17,14 @@ import {
   staff,
   users,
 } from "@shopino/db";
-import { APPOINTMENT_STATUSES, PLAN_IDS } from "@shopino/shared";
+import { APPOINTMENT_STATUSES, DEFAULT_PLANS, PLAN_FEATURES, PLAN_IDS, PLANS } from "@shopino/shared";
 import type { Ctx } from "../../lib/context";
 import { authenticate, invalidateShopCache } from "../../lib/auth";
 import { audit } from "../../lib/audit";
 import { TtlCache } from "../../lib/cache";
 import { forbidden, notFound } from "../../lib/errors";
 import { walletMove } from "../wallet/service";
-import { describeSettings, saveSettings } from "../../lib/platform";
+import { describeSettings, planOverrides, saveSettings, savePlanOverrides } from "../../lib/platform";
 import { randomToken } from "../../lib/crypto";
 import { env } from "../../config";
 import { checkAccount, disconnectInstagram, metaSetup, refreshShopToken, resubscribeWebhooks, tokenState, webhookHeartbeat } from "../instagram/account";
@@ -262,6 +262,24 @@ export const adminRoutes =
         .orderBy(desc(automationEvents.createdAt))
         .limit(100),
     );
+
+    // ---- plans: prices, limits and features (defaults in code, overrides stored here)
+    const limit = z.number().int().min(0).max(1_000_000).nullable();
+    const planOverride = z
+      .object({
+        monthly: z.number().int().min(0).max(1_000_000_000).nullable(),
+        yearlyPerMonth: z.number().int().min(0).max(1_000_000_000).nullable(),
+        aiGiftCredit: z.number().int().min(0).max(1_000_000_000),
+        recommended: z.boolean(),
+        limits: z.object({ products: limit, ordersPerMonth: limit, staff: limit, bookingsPerMonth: limit }).partial(),
+        features: z.array(z.enum(PLAN_FEATURES)),
+      })
+      .partial();
+    app.get("/plans", async () => ({ plans: PLAN_IDS.map((id) => PLANS[id]), defaults: PLAN_IDS.map((id) => DEFAULT_PLANS[id]), overrides: planOverrides(), features: PLAN_FEATURES }));
+    app.put("/plans", { schema: { body: z.object({ overrides: z.partialRecord(z.enum(PLAN_IDS), planOverride) }) } }, async (req) => {
+      await savePlanOverrides(ctx.db, req.body.overrides, req.user.sub);
+      return { plans: PLAN_IDS.map((id) => PLANS[id]), overrides: planOverrides() };
+    });
 
     // ---- Instagram API: Meta app setup values, webhook heartbeat, every connected account
     app.get("/instagram", async () => {

@@ -22,6 +22,25 @@ export default function OnboardingPage() {
   const { t } = useI18n();
   const [step, setStep] = useState(0);
   const [shop, setShop] = useState<{ id: string; slug: string; kind: Kind } | null>(null);
+  const [igResult, setIgResult] = useState<string | null>(null);
+  // back from Instagram's consent screen: pick up the shop created earlier and resume at "connect"
+  useEffect(() => {
+    const q = new URLSearchParams(window.location.search);
+    if (q.get("step") !== "connect") return;
+    const ig = q.get("ig");
+    if (ig) setIgResult(ig === "error" ? `error.${q.get("reason") ?? "exchange"}` : ig);
+    let id: string | null = null;
+    try {
+      id = localStorage.getItem("shopId");
+    } catch {}
+    if (!id) return;
+    api<{ shop: { id: string; slug: string; kind: Kind } }>(`/shops/${id}`)
+      .then((r) => {
+        setShop({ id: r.shop.id, slug: r.shop.slug, kind: r.shop.kind });
+        setStep(3);
+      })
+      .catch(() => undefined);
+  }, []);
   return (
     <div className="night-sky flex min-h-dvh items-center justify-center px-4 py-10">
       <div className="glass w-full max-w-lg rounded-[1.75rem] p-7">
@@ -48,7 +67,7 @@ export default function OnboardingPage() {
           )}
           {step === 1 && shop && <BrandStep shopId={shop.id} onNext={() => setStep(2)} />}
           {step === 2 && shop && <ContactStep shopId={shop.id} kind={shop.kind} onBack={() => setStep(1)} onNext={() => setStep(3)} />}
-          {step === 3 && shop && <ConnectStep shopId={shop.id} onNext={() => setStep(4)} />}
+          {step === 3 && shop && <ConnectStep shopId={shop.id} result={igResult} onNext={() => setStep(4)} />}
           {step === 4 && shop && <DoneStep slug={shop.slug} kind={shop.kind} />}
         </div>
       </div>
@@ -258,7 +277,7 @@ function ContactStep({ shopId, kind, onBack, onNext }: { shopId: string; kind: K
 }
 
 /** Instagram + AI: the two things that make the assistant useful. Both can be done later from settings. */
-function ConnectStep({ shopId, onNext }: { shopId: string; onNext: () => void }) {
+function ConnectStep({ shopId, result, onNext }: { shopId: string; result: string | null; onNext: () => void }) {
   const { t } = useI18n();
   const { data: platform } = useApi<{ ai: boolean; instagramOAuth: boolean }>("/platform/status");
   const [busy, setBusy] = useState(false);
@@ -280,22 +299,44 @@ function ConnectStep({ shopId, onNext }: { shopId: string; onNext: () => void })
         <h2 className="text-lg font-bold strong">{t("onb.connect.t")}</h2>
         <p className="mt-1 text-sm muted">{t("onb.connect.s")}</p>
       </div>
-      <ol className="space-y-2 text-sm">
-        {(["onb.connect.1", "onb.connect.2", "onb.connect.3"] as const).map((k, i) => (
-          <li key={k} className="flex gap-2">
-            <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-gold/15 text-[11px] text-[var(--accent)]">{i + 1}</span>
-            <span>{t(k)}</span>
-          </li>
-        ))}
-      </ol>
-      {platform && !platform.instagramOAuth && <p className="text-xs text-warning">{t("ig.notConfigured")}</p>}
-      {platform && !platform.ai && <p className="text-xs text-warning">{t("onb.aiOff")}</p>}
+      {result === "connected" ? (
+        <div className="space-y-2 rounded-2xl bg-success/10 p-4 text-sm">
+          <p className="font-semibold text-success">✓ {t("ig.result.connected")}</p>
+          <ul className="space-y-1 muted">
+            <li>• {t("onb.auto.posts")}</li>
+            <li>• {t("onb.auto.knowledge")}</li>
+            <li>• {t("onb.auto.webhook")}</li>
+          </ul>
+        </div>
+      ) : (
+        <>
+          {result && <p className="rounded-xl bg-danger/10 px-3 py-2 text-sm text-danger">{t(`ig.result.${result}` as DictKey)}</p>}
+          <ol className="space-y-2 text-sm">
+            {(["onb.connect.1", "onb.connect.2", "onb.connect.3"] as const).map((k, i) => (
+              <li key={k} className="flex gap-2">
+                <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-gold/15 text-[11px] text-[var(--accent)]">{i + 1}</span>
+                <span>{t(k)}</span>
+              </li>
+            ))}
+          </ol>
+          {platform && !platform.instagramOAuth && <p className="text-xs text-warning">{t("ig.notConfigured")}</p>}
+          {platform && !platform.ai && <p className="text-xs text-warning">{t("onb.aiOff")}</p>}
+        </>
+      )}
       <ErrorNote error={error} />
       <div className="flex gap-2">
-        <Button variant="ghost" onClick={onNext}>{t("onb.later")}</Button>
-        <Button variant="primary" className="flex-1" loading={busy} disabled={!platform?.instagramOAuth} onClick={connect}>
-          {t("ig.connectBtn")}
-        </Button>
+        {result === "connected" ? (
+          <Button variant="primary" className="flex-1" onClick={onNext}>
+            {t("onb.next")}
+          </Button>
+        ) : (
+          <>
+            <Button variant="ghost" onClick={onNext}>{t("onb.later")}</Button>
+            <Button variant="primary" className="flex-1" loading={busy} disabled={!platform?.instagramOAuth} onClick={connect}>
+              {t("ig.connectBtn")}
+            </Button>
+          </>
+        )}
       </div>
     </div>
   );

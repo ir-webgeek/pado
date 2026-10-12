@@ -5,6 +5,7 @@ import type { Ctx } from "./lib/context";
 import { requireShop } from "./lib/auth";
 import { saveUpload } from "./lib/uploads";
 import { cfg } from "./lib/platform";
+import { PLAN_IDS, PLANS } from "@shopino/shared";
 import { env } from "./config";
 import { aiAvailable } from "./modules/agent/llm";
 import { instagramOAuthConfigured } from "./modules/instagram/oauth";
@@ -46,6 +47,11 @@ export const routes =
   (ctx: Ctx): FastifyPluginAsync =>
   async (app) => {
     // what is configured platform-wide (no secrets): drives demo-gateway notices and onboarding
+    // live plan table for the public pricing page (after the super admin's edits)
+    app.get("/platform/plans", async (_req, reply) => {
+      reply.header("cache-control", "public, max-age=60");
+      return { plans: PLAN_IDS.map((id) => PLANS[id]) };
+    });
     app.get("/platform/status", async () => {
       const gateway = cfg("PAYMENT_PROVIDER") ?? env.PAYMENT_PROVIDER;
       return { gateway, demoGateway: gateway === "mock", ai: aiAvailable(), instagramOAuth: instagramOAuthConfigured() };

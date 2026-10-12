@@ -5,16 +5,17 @@ import { AlertTriangle, ArrowLeft, Bot, Building2, CalendarCheck2, Coins, Messag
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { PLAN_IDS } from "@shopino/shared";
+import { PLAN_IDS, type Plan, type PlanFeature, type PlanId } from "@shopino/shared";
+import { featureLabels, planNames } from "@/components/landing/pricing-cards";
 import { Logo } from "@/components/logo";
 import { LangToggle, ThemeToggle } from "@/components/prefs";
 import { Badge, Button, Card, Input, Modal, Select, Spinner, Tabs, Textarea, statusTone } from "@/components/ui";
 import { api, useApi } from "@/lib/api";
-import { dateTime, money, num } from "@/lib/format";
+import { dateTime, latinDigits, money, num } from "@/lib/format";
 import type { DictKey } from "@/lib/i18n";
 import { useI18n } from "@/lib/locale-client";
 
-type Tab = "overview" | "shops" | "bookings" | "dms" | "fees" | "instagram" | "config";
+type Tab = "overview" | "shops" | "bookings" | "dms" | "fees" | "plans" | "instagram" | "config";
 
 /** Platform super admin: clients (shops), their reservations, and how automated DMs are being handled. */
 export default function AdminPage() {
@@ -56,6 +57,7 @@ export default function AdminPage() {
               { value: "bookings", label: t("ad.bookings") },
               { value: "dms", label: t("ad.dms") },
               { value: "fees", label: t("ad.fees") },
+              { value: "plans", label: t("adp.tab") },
               { value: "instagram", label: t("adi.tab") },
               { value: "config", label: t("ad.config") },
             ]}
@@ -71,6 +73,7 @@ export default function AdminPage() {
         {tab === "bookings" && <Bookings shopId={shopFilter?.id} />}
         {tab === "dms" && <Dms shopId={shopFilter?.id} />}
         {tab === "fees" && <Fees />}
+        {tab === "plans" && <PlansAdmin />}
         {tab === "instagram" && <InstagramAdmin />}
         {tab === "config" && <PlatformConfig />}
       </main>
@@ -689,6 +692,124 @@ function InstagramAdmin() {
           {data.accounts.length === 0 && <p className="p-4 text-sm muted">{t("adi.none")}</p>}
         </div>
       </Card>
+    </div>
+  );
+}
+
+type PlanOverride = Partial<Pick<Plan, "monthly" | "yearlyPerMonth" | "aiGiftCredit" | "features" | "recommended">> & { limits?: Partial<Plan["limits"]> };
+
+/** Prices, limits and features of every plan. Changes apply to the API, feature gates and the public pricing page. */
+function PlansAdmin() {
+  const { t, locale } = useI18n();
+  const { data, mutate } = useApi<{ plans: Plan[]; defaults: Plan[]; overrides: Partial<Record<PlanId, PlanOverride>>; features: PlanFeature[] }>("/admin/plans");
+  const [draft, setDraft] = useState<Record<string, Plan> | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  if (!data) return <Spinner />;
+  const plans = draft ?? Object.fromEntries(data.plans.map((p) => [p.id, p]));
+  const defaults = Object.fromEntries(data.defaults.map((p) => [p.id, p])) as Record<PlanId, Plan>;
+  const set = (id: PlanId, patch: Partial<Plan>) => setDraft({ ...plans, [id]: { ...plans[id]!, ...patch } });
+  const numOrNull = (v: string) => (v.trim() === "" ? null : Math.max(0, Math.round(Number(latinDigits(v)) || 0)));
+  const save = async () => {
+    setBusy(true);
+    setMsg(null);
+    try {
+      // store only what differs from the shipped defaults
+      const overrides: Partial<Record<PlanId, PlanOverride>> = {};
+      for (const id of PLAN_IDS) {
+        const p = plans[id]!;
+        const d = defaults[id];
+        const o: PlanOverride = {};
+        if (p.monthly !== d.monthly) o.monthly = p.monthly;
+        if (p.yearlyPerMonth !== d.yearlyPerMonth) o.yearlyPerMonth = p.yearlyPerMonth;
+        if (p.aiGiftCredit !== d.aiGiftCredit) o.aiGiftCredit = p.aiGiftCredit;
+        if (Boolean(p.recommended) !== Boolean(d.recommended)) o.recommended = Boolean(p.recommended);
+        const lim = Object.fromEntries(Object.entries(p.limits).filter(([k, v]) => d.limits[k as keyof Plan["limits"]] !== v));
+        if (Object.keys(lim).length) o.limits = lim;
+        if ([...p.features].sort().join() !== [...d.features].sort().join()) o.features = p.features;
+        if (Object.keys(o).length) overrides[id] = o;
+      }
+      await api("/admin/plans", { method: "PUT", json: { overrides } });
+      setDraft(null);
+      await mutate();
+      setMsg({ ok: true, text: t("s.saved") });
+    } catch (e) {
+      setMsg({ ok: false, text: (e as Error).message });
+    } finally {
+      setBusy(false);
+    }
+  };
+  const limitKeys = ["products", "ordersPerMonth", "staff", "bookingsPerMonth"] as const;
+  return (
+    <div className="space-y-4">
+      <p className="text-sm muted">{t("adp.sub")}</p>
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        {PLAN_IDS.map((id) => {
+          const p = plans[id]!;
+          const changed = JSON.stringify(p) !== JSON.stringify({ ...defaults[id], recommended: defaults[id].recommended });
+          return (
+            <Card key={id} className="space-y-3">
+              <div className="flex items-center justify-between gap-2">
+                <h3 className="font-semibold strong">
+                  {planNames[id][locale]} <span className="text-xs uppercase muted">{id}</span>
+                </h3>
+                <div className="flex items-center gap-2">
+                  {changed && <Badge tone="gold">{t("adp.custom")}</Badge>}
+                  <Button size="sm" variant="ghost" onClick={() => set(id, JSON.parse(JSON.stringify(defaults[id])))}>
+                    {t("adp.reset")}
+                  </Button>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                {(["monthly", "yearlyPerMonth"] as const).map((k) => (
+                  <label key={k} className="block">
+                    <span className="label">{t(`adp.${k}` as DictKey)}</span>
+                    <Input dir="ltr" inputMode="numeric" placeholder={t("adp.contact")} value={p[k] ?? ""} onChange={(e) => set(id, { [k]: numOrNull(e.target.value) })} />
+                  </label>
+                ))}
+                <label className="block">
+                  <span className="label">{t("adp.aiGift")}</span>
+                  <Input dir="ltr" inputMode="numeric" value={p.aiGiftCredit} onChange={(e) => set(id, { aiGiftCredit: numOrNull(e.target.value) ?? 0 })} />
+                </label>
+                <label className="flex items-end gap-2 pb-2 text-sm">
+                  <input type="checkbox" checked={Boolean(p.recommended)} onChange={(e) => set(id, { recommended: e.target.checked })} /> {t("pricing.recommended")}
+                </label>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                {limitKeys.map((k) => (
+                  <label key={k} className="block">
+                    <span className="label">{t(`adp.lim.${k}` as DictKey)}</span>
+                    <Input dir="ltr" inputMode="numeric" placeholder="∞" value={p.limits[k] ?? ""} onChange={(e) => set(id, { limits: { ...p.limits, [k]: numOrNull(e.target.value) } })} />
+                  </label>
+                ))}
+              </div>
+              <details>
+                <summary className="cursor-pointer text-sm strong">
+                  {t("adp.features")} <span className="num muted">({p.features.length})</span>
+                </summary>
+                <div className="mt-2 grid gap-1">
+                  {data.features.map((f) => (
+                    <label key={f} className="flex items-center gap-2 text-xs">
+                      <input
+                        type="checkbox"
+                        checked={p.features.includes(f)}
+                        onChange={(e) => set(id, { features: e.target.checked ? [...p.features, f] : p.features.filter((x) => x !== f) })}
+                      />
+                      {featureLabels[f]?.[locale] ?? f}
+                    </label>
+                  ))}
+                </div>
+              </details>
+            </Card>
+          );
+        })}
+      </div>
+      <div className="flex items-center justify-end gap-3">
+        {msg && <span className={msg.ok ? "text-sm text-success" : "text-sm text-danger"}>{msg.text}</span>}
+        <Button variant="primary" loading={busy} disabled={!draft} onClick={save}>
+          {t("a.save")}
+        </Button>
+      </div>
     </div>
   );
 }

@@ -1,6 +1,7 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { platformSettings, type Database } from "@shopino/db";
+import { applyPlanOverrides, type PlanId, type PlanOverride } from "@shopino/shared";
 import { env } from "../config";
 
 /**
@@ -104,6 +105,11 @@ async function reload() {
   }
   cache = next;
   loadedAt = Date.now();
+  try {
+    applyPlanOverrides(JSON.parse(next.get("PLANS") ?? "{}"));
+  } catch {
+    console.error("[platform] stored plan overrides are not valid JSON");
+  }
 }
 
 /** Current value: panel setting, else environment variable. */
@@ -159,3 +165,22 @@ export async function saveSettings(database: Database, values: Record<string, st
 const eqKey = (key: string) => eq(platformSettings.key, key);
 
 export const settingsLoadedAt = () => loadedAt;
+
+/** Super admin's plan table edits (prices, limits, features); empty object restores the defaults. */
+export async function savePlanOverrides(database: Database, overrides: Partial<Record<PlanId, PlanOverride>>, userId: string) {
+  const value = JSON.stringify(overrides);
+  await database
+    .insert(platformSettings)
+    .values({ key: "PLANS", value, secret: false, updatedBy: userId })
+    .onConflictDoUpdate({ target: platformSettings.key, set: { value, updatedBy: userId, updatedAt: new Date() } });
+  db ??= database;
+  await reload();
+}
+
+export const planOverrides = (): Partial<Record<PlanId, PlanOverride>> => {
+  try {
+    return JSON.parse(cache.get("PLANS") ?? "{}");
+  } catch {
+    return {};
+  }
+};
