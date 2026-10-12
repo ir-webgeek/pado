@@ -1,11 +1,11 @@
 "use client";
 
 import clsx from "clsx";
-import { Bot, FlaskConical, Link2, MessageCircle, RotateCcw, Send, User } from "lucide-react";
+import { Bot, CheckCircle2, CircleDot, FlaskConical, Flag, Hand, Link2, MessageCircle, RotateCcw, Send, ShoppingBag, CalendarCheck, User, UserCheck } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Avatar, Badge, Button, Card, Empty, ErrorNote, Input, PageHeader, Spinner, Tabs, statusTone } from "@/components/ui";
 import { api, useApi } from "@/lib/api";
-import { money, num, relative, time } from "@/lib/format";
+import { dateTime, money, num, relative, time } from "@/lib/format";
 import type { DictKey } from "@/lib/i18n";
 import { useI18n } from "@/lib/locale-client";
 import { useShop } from "@/lib/shop";
@@ -18,10 +18,31 @@ interface Conversation {
   segment: string | null;
   mode: "agent" | "human";
   needsHuman: boolean;
+  status: Status;
+  assigneeId: string | null;
+  assigneeName?: string | null;
   unread: number;
   lastMessageAt: string;
   lastText: string | null;
 }
+type Status = "open" | "needs_human" | "in_progress" | "resolved";
+type Filter = "all" | "needs_human" | "mine" | "in_progress" | "open" | "resolved" | "unread";
+interface Summary {
+  counts: { open: number; needsHuman: number; inProgress: number; resolved: number; mine: number; unread: number; oldestWaiting: string | null };
+  team: { userId: string; name: string | null; role: string }[];
+  me: string;
+}
+interface ConvEvent {
+  id: string;
+  type: "handoff" | "assigned" | "human_reply" | "status" | "reopened" | "order" | "booking" | "mode";
+  data: Record<string, unknown> | null;
+  createdAt: string;
+  actorName: string | null;
+  actorId: string | null;
+}
+const STATUS_KEY: Record<Status, DictKey> = { open: "in.open", needs_human: "in.needsHuman", in_progress: "in.inProgress", resolved: "in.resolved" };
+const STATUS_TONE = { open: "neutral", needs_human: "warning", in_progress: "info", resolved: "success" } as const;
+
 interface SiteActivity {
   visits: number;
   lastAt: string | null;
@@ -40,21 +61,30 @@ interface Message {
 export default function InboxPage() {
   const { t, locale } = useI18n();
   const { shop } = useShop();
-  const [filter, setFilter] = useState<"all" | "needs_human" | "unread" | "playground">("all");
+  const [filter, setFilter] = useState<Filter | "playground">("all");
   const [active, setActive] = useState<string | null>(null);
   const { data: convs, mutate } = useApi<Conversation[]>(filter === "playground" ? null : `/shops/${shop.id}/conversations?filter=${filter}`, { refreshInterval: 10_000 });
+  const { data: summary, mutate: reloadSummary } = useApi<Summary>(`/shops/${shop.id}/conversations/summary`, { refreshInterval: 15_000 });
+  const counts = summary?.counts;
 
   return (
     <div>
-      <PageHeader title={t("p.inbox")} />
+      <PageHeader
+        title={t("p.inbox")}
+        subtitle={counts?.oldestWaiting ? <span className="text-warning">{t("in.waitingSince").replace("{t}", relative(counts.oldestWaiting, locale))}</span> : undefined}
+      />
       <div className="mb-4">
         <Tabs
           value={filter}
           onChange={(v) => (setFilter(v), setActive(null))}
           items={[
             { value: "all", label: t("in.all") },
-            { value: "needs_human", label: t("in.needsHuman") },
-            { value: "unread", label: t("in.unread") },
+            { value: "needs_human", label: <span className="inline-flex items-center gap-1"><Flag className="size-3.5 text-warning" /> {t("in.needsHuman")}</span>, count: counts?.needsHuman },
+            { value: "mine", label: t("in.mine"), count: counts?.mine },
+            { value: "in_progress", label: t("in.inProgress"), count: counts?.inProgress },
+            { value: "open", label: t("in.open"), count: counts?.open },
+            { value: "resolved", label: t("in.resolved") },
+            { value: "unread", label: t("in.unread"), count: counts?.unread },
             { value: "playground", label: <span className="inline-flex items-center gap-1"><FlaskConical className="size-3.5" /> {t("in.playground")}</span> },
           ]}
         />
@@ -83,10 +113,20 @@ export default function InboxPage() {
                           {c.segment && <Badge tone={statusTone(c.segment)}>{t(`seg.${c.segment}` as DictKey)}</Badge>}
                         </span>
                         <span className="block truncate text-xs muted">{c.lastText}</span>
+                        {(c.status !== "open" || c.assigneeName) && (
+                          <span className="mt-1 flex items-center gap-1.5 text-[10px]">
+                            {c.status !== "open" && <Badge tone={STATUS_TONE[c.status]}>{t(STATUS_KEY[c.status])}</Badge>}
+                            {c.assigneeName && (
+                              <span className="inline-flex items-center gap-0.5 muted">
+                                <UserCheck className="size-3" /> {c.assigneeName}
+                              </span>
+                            )}
+                          </span>
+                        )}
                       </span>
                       <span className="flex flex-col items-end gap-1">
                         <span className="text-[10px] muted">{relative(c.lastMessageAt, locale)}</span>
-                        {c.needsHuman ? <span className="size-2 rounded-full bg-warning" /> : c.unread > 0 ? <span className="size-2 rounded-full bg-info" /> : null}
+                        {c.status === "needs_human" || c.needsHuman ? <span className="size-2 rounded-full bg-warning" /> : c.unread > 0 ? <span className="size-2 rounded-full bg-info" /> : null}
                       </span>
                     </button>
                   </li>
@@ -94,7 +134,7 @@ export default function InboxPage() {
               </ul>
             )}
           </Card>
-          {active ? <Thread id={active} onBack={() => setActive(null)} onChange={() => mutate()} /> : (
+          {active ? <Thread id={active} team={summary?.team ?? []} me={summary?.me} onBack={() => setActive(null)} onChange={() => (mutate(), reloadSummary())} /> : (
             <Card className="hidden lg:block">
               <Empty icon={<MessageCircle className="size-6" />} title={t("in.pick")} />
             </Card>
@@ -122,10 +162,45 @@ function Bubble({ m }: { m: Pick<Message, "direction" | "sender" | "text" | "cre
   );
 }
 
-function Thread({ id, onBack, onChange }: { id: string; onBack: () => void; onChange: () => void }) {
+function EventRow({ e, team }: { e: ConvEvent; team: Summary["team"] }) {
+  const { t, locale } = useI18n();
+  const d = e.data ?? {};
+  let icon = <CircleDot className="size-3.5" />;
+  let text: string = t(`cev.${e.type}` as DictKey);
+  if (e.type === "handoff") {
+    icon = <Flag className="size-3.5 text-warning" />;
+    if (d.reason) text += `: ${String(d.reason)}`;
+  } else if (e.type === "assigned") {
+    icon = <UserCheck className="size-3.5 text-info" />;
+    const who = team.find((m) => m.userId === d.assigneeId)?.name;
+    text = d.assigneeId ? `${t("cev.assigned")}${who ? `: ${who}` : ""}` : t("cev.unassigned");
+  } else if (e.type === "human_reply") {
+    icon = <Hand className="size-3.5 text-info" />;
+  } else if (e.type === "status") {
+    icon = d.status === "resolved" ? <CheckCircle2 className="size-3.5 text-success" /> : <CircleDot className="size-3.5" />;
+    text += `: ${t(STATUS_KEY[d.status as Status] ?? "in.open")}`;
+  } else if (e.type === "order" || e.type === "booking") {
+    icon = e.type === "order" ? <ShoppingBag className="size-3.5 text-[var(--accent)]" /> : <CalendarCheck className="size-3.5 text-[var(--accent)]" />;
+    text += ` ${String(d.code ?? "")} ${t(d.step === "paid" ? "cev.paid" : "cev.created")}`;
+    if (typeof d.total === "number") text += ` · ${money(d.total, locale, false)}`;
+    if (typeof d.startsAt === "string") text += ` · ${dateTime(d.startsAt, locale)}`;
+  } else if (e.type === "mode") {
+    text += `: ${t(d.mode === "agent" ? "in.agentOn" : "in.humanOn")}`;
+  }
+  return (
+    <div className="flex items-center justify-center gap-1.5 self-center rounded-full border border-dashed border-[var(--border)] px-3 py-1 text-[11px] muted">
+      {icon}
+      <span>{text}</span>
+      {e.actorName && !(e.type === "assigned" && d.assigneeId === e.actorId) && <span>· {e.actorName}</span>}
+      <span className="num">· {time(e.createdAt, locale)}</span>
+    </div>
+  );
+}
+
+function Thread({ id, team, me, onBack, onChange }: { id: string; team: Summary["team"]; me?: string; onBack: () => void; onChange: () => void }) {
   const { t, locale } = useI18n();
   const { shop } = useShop();
-  const { data, mutate } = useApi<{ conversation: Conversation; messages: Message[]; site: SiteActivity }>(`/shops/${shop.id}/conversations/${id}/messages`, { refreshInterval: 5000 });
+  const { data, mutate } = useApi<{ conversation: Conversation; events: ConvEvent[]; messages: Message[]; site: SiteActivity }>(`/shops/${shop.id}/conversations/${id}/messages`, { refreshInterval: 5000 });
   const [text, setText] = useState("");
   const [error, setError] = useState<unknown>(null);
   const end = useRef<HTMLDivElement>(null);
@@ -146,11 +221,22 @@ function Thread({ id, onBack, onChange }: { id: string; onBack: () => void; onCh
       setError(err);
     }
   };
-  const setMode = async (mode: "agent" | "human") => {
-    await api(`/shops/${shop.id}/conversations/${id}`, { method: "PATCH", json: { mode, needsHuman: false } });
-    mutate();
-    onChange();
+  const update = async (body: { mode?: "agent" | "human"; status?: Status; assigneeId?: string | null }) => {
+    setError(null);
+    try {
+      await api(`/shops/${shop.id}/conversations/${id}`, { method: "PATCH", json: body });
+      mutate();
+      onChange();
+    } catch (err) {
+      setError(err);
+    }
   };
+  const setMode = (mode: "agent" | "human") => update(mode === "agent" ? { mode, ...(conv.status === "needs_human" ? { status: "open" as const } : {}) } : { mode });
+  // messages and progress events in one time line
+  const timeline = [
+    ...data.messages.map((m) => ({ at: m.createdAt, kind: "m" as const, m })),
+    ...(data.events ?? []).map((e) => ({ at: e.createdAt, kind: "e" as const, e })),
+  ].sort((a, b) => a.at.localeCompare(b.at));
 
   return (
     <Card className="flex h-[70dvh] flex-col !p-0">
@@ -165,6 +251,46 @@ function Thread({ id, onBack, onChange }: { id: string; onBack: () => void; onCh
             <User className="size-3.5" /> {t("in.humanOn")}
           </button>
         </div>
+      </div>
+      <div className="flex flex-wrap items-center gap-2 border-b border-[var(--border)] px-4 py-2 text-xs">
+        <Badge tone={STATUS_TONE[conv.status]}>{t(STATUS_KEY[conv.status])}</Badge>
+        <label className="flex items-center gap-1 muted">
+          <UserCheck className="size-3.5" />
+          <select
+            aria-label={t("in.assignee")}
+            value={conv.assigneeId ?? ""}
+            onChange={(e) => update({ assigneeId: e.target.value || null })}
+            className="rounded-lg bg-transparent py-0.5 text-xs strong focus:outline-none"
+          >
+            <option value="">{t("in.unassigned")}</option>
+            {team.map((m) => (
+              <option key={m.userId} value={m.userId}>
+                {m.name ?? m.userId.slice(0, 8)}
+              </option>
+            ))}
+          </select>
+        </label>
+        <span className="ms-auto flex flex-wrap gap-1.5">
+          {me && conv.assigneeId !== me && conv.status !== "resolved" && (
+            <Button size="sm" variant="ghost" onClick={() => update({ assigneeId: me })}>
+              <Hand className="size-3.5" /> {t("in.takeIt")}
+            </Button>
+          )}
+          {conv.status !== "needs_human" && conv.status !== "resolved" && (
+            <Button size="sm" variant="ghost" onClick={() => update({ status: "needs_human" })}>
+              <Flag className="size-3.5" /> {t("in.flag")}
+            </Button>
+          )}
+          {conv.status === "resolved" ? (
+            <Button size="sm" variant="ghost" onClick={() => update({ status: "open" })}>
+              <RotateCcw className="size-3.5" /> {t("in.reopen")}
+            </Button>
+          ) : (
+            <Button size="sm" onClick={() => update({ status: "resolved" })}>
+              <CheckCircle2 className="size-3.5" /> {t("in.resolve")}
+            </Button>
+          )}
+        </span>
       </div>
       {(data.site.visits > 0 || data.site.orders.length > 0 || data.site.bookings.length > 0) && (
         <div className="flex flex-wrap items-center gap-2 border-b border-[var(--border)] bg-[var(--surface-sunken)] px-4 py-2 text-xs">
@@ -195,9 +321,7 @@ function Thread({ id, onBack, onChange }: { id: string; onBack: () => void; onCh
         </div>
       )}
       <div className="scroll-thin flex flex-1 flex-col gap-2 overflow-y-auto p-4">
-        {data.messages.map((m) => (
-          <Bubble key={m.id} m={m} />
-        ))}
+        {timeline.map((x) => (x.kind === "m" ? <Bubble key={x.m.id} m={x.m} /> : <EventRow key={x.e.id} e={x.e} team={team} />))}
         <div ref={end} />
       </div>
       <form onSubmit={send} className="flex gap-2 border-t border-[var(--border)] p-3">

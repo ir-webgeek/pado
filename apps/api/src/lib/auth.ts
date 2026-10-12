@@ -1,8 +1,8 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { and, eq } from "drizzle-orm";
-import { resolveShopSettings, shopMembers, shops, type ShopSettings } from "@shopino/db";
+import { resolveShopSettings, shopMembers, shopRoles, shops, type ShopSettings } from "@shopino/db";
 import type { MemberRole, PlanFeature, PlanId } from "@shopino/shared";
-import { planHas } from "@shopino/shared";
+import { BUILTIN_PERMISSIONS, canAccess, planHas, sectionOfRoute, type Permissions } from "@shopino/shared";
 import { TtlCache } from "./cache";
 import type { Ctx } from "./context";
 import { forbidden, notFound, paymentRequired, unauthorized } from "./errors";
@@ -18,6 +18,9 @@ export interface ShopCtx {
   settings: ShopSettings;
   role: MemberRole;
   memberId: string;
+  /** effective panel permissions (built-in role, or the member's custom role) */
+  permissions: Permissions;
+  customRole: { id: string; name: string } | null;
   suspended: boolean;
 }
 
@@ -68,9 +71,10 @@ async function loadShopCtx(ctx: Ctx, shopId: string, userId: string): Promise<Sh
   const cached = membershipCache.get(key);
   if (cached !== undefined) return cached;
   const [row] = await ctx.db
-    .select({ shop: shops, memberId: shopMembers.id, role: shopMembers.role })
+    .select({ shop: shops, memberId: shopMembers.id, role: shopMembers.role, customRole: shopRoles })
     .from(shopMembers)
     .innerJoin(shops, eq(shops.id, shopMembers.shopId))
+    .leftJoin(shopRoles, and(eq(shopRoles.id, shopMembers.customRoleId), eq(shopRoles.shopId, shopMembers.shopId)))
     .where(and(eq(shopMembers.shopId, shopId), eq(shopMembers.userId, userId)))
     .limit(1);
   const value: ShopCtx | null = row
@@ -85,6 +89,12 @@ async function loadShopCtx(ctx: Ctx, shopId: string, userId: string): Promise<Sh
         settings: resolveShopSettings(row.shop.settings),
         role: row.role,
         memberId: row.memberId,
+        // the owner always keeps full access; a custom role only applies to other members
+        customRole: row.customRole && row.role !== "owner" ? { id: row.customRole.id, name: row.customRole.name } : null,
+        permissions:
+          row.customRole && row.role !== "owner"
+            ? { ...BUILTIN_PERMISSIONS.viewer, ...(row.customRole.permissions as Partial<Permissions>) }
+            : BUILTIN_PERMISSIONS[row.role],
         suspended: Boolean(row.shop.suspendedAt),
       }
     : null;
@@ -100,7 +110,14 @@ export function requireShop(ctx: Ctx, minRole: MemberRole = "viewer") {
     if (!shopId || !/^[0-9a-f-]{36}$/i.test(shopId)) throw notFound("shop");
     const shop = await loadShopCtx(ctx, shopId, req.user.sub);
     if (!shop) throw notFound("shop");
-    if (ROLE_RANK[shop.role] < ROLE_RANK[minRole]) throw forbidden(`requires ${minRole} role`);
+    if (shop.customRole) {
+      // custom roles: the section of the route decides (GET = view, anything else = edit)
+      if (minRole === "owner") throw forbidden("requires owner role");
+      const section = sectionOfRoute(req.routeOptions.url ?? "");
+      const need = req.method === "GET" ? "view" : "edit";
+      const allowed = section ? canAccess(shop.permissions, section, need) : need === "view" || canAccess(shop.permissions, "settings", "edit");
+      if (!allowed) throw forbidden(`your role cannot ${need} ${section ?? "settings"}`);
+    } else if (ROLE_RANK[shop.role] < ROLE_RANK[minRole]) throw forbidden(`requires ${minRole} role`);
     if (req.method !== "GET" && shop.suspended) throw forbidden("this shop is suspended - contact support");
     // writes are blocked while the plan is expired (reads stay available)
     if (req.method !== "GET" && shop.planExpiresAt && shop.planExpiresAt < new Date()) {
@@ -108,6 +125,11 @@ export function requireShop(ctx: Ctx, minRole: MemberRole = "viewer") {
     }
     req.shop = shop;
   };
+}
+
+/** Team access stays with built-in owners/admins: a custom role could otherwise widen its own permissions. */
+export async function requireBuiltinRole(req: FastifyRequest) {
+  if (req.shop.customRole) throw forbidden("only owners and admins manage team access");
 }
 
 export function requireFeature(shop: ShopCtx, feature: PlanFeature) {

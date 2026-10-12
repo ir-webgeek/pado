@@ -4,6 +4,7 @@ import { env } from "../../config";
 import { hmacSha256Hex } from "../../lib/crypto";
 import { sendAttachment, sendButtons, sendText, type IgAccount } from "../instagram/client";
 import { tagLinks, tagUrl } from "../inbox/dm-ref";
+import { flagForHuman } from "../inbox/progress";
 
 type Rule = typeof automationRules.$inferSelect;
 
@@ -83,8 +84,6 @@ export async function recordRuleHit(db: Database, rule: Rule, conversationId: st
 /** After a rule fires the conversation continues with AI, a human, or stays as it was. */
 export async function applyThenMode(db: Database, rule: Rule, conversationId: string) {
   if (rule.thenMode === "keep") return;
-  await db
-    .update(conversations)
-    .set(rule.thenMode === "human" ? { mode: "human", needsHuman: true } : { mode: "agent" })
-    .where(eq(conversations.id, conversationId));
+  if (rule.thenMode === "human") return flagForHuman(db, rule.shopId, conversationId, `automation: ${rule.name}`, { mode: "human" });
+  await db.update(conversations).set({ mode: "agent" }).where(eq(conversations.id, conversationId));
 }

@@ -12,6 +12,7 @@ import { upsertCustomer } from "../customers/service";
 import { replyToComment, sendPrivateReply, sendText, type IgAccount } from "../instagram/client";
 import { escapeHtml, sendTelegram } from "../notifications/telegram";
 import { walletBalance } from "../wallet/service";
+import { flagForHuman, noteHumanReply, reopenIfResolved } from "./progress";
 
 export interface InboundMessage {
   shopId: string;
@@ -90,6 +91,7 @@ export async function handleInbound(db: Database, queues: Queues, redis: Redis, 
     .onConflictDoNothing()
     .returning({ id: messages.id });
   if (!inserted.length) return { reply: null, handoff: null }; // duplicate webhook delivery
+  await reopenIfResolved(db, shop.id, conv!.id);
 
   // ---- static automations (free tier, no AI)
   if (planHas(shop.plan, "automations")) {
@@ -144,7 +146,7 @@ export async function handleInbound(db: Database, queues: Queues, redis: Redis, 
         // delivery problems surface in the inbox; the handoff below still alerts the team
       }
     }
-    await db.update(conversations).set({ needsHuman: true, lastMessageAt: new Date() }).where(eq(conversations.id, conv!.id));
+    await flagForHuman(db, shop.id, conv!.id, "voice message", { lastMessageAt: new Date() });
     await queues.add("notify.handoff", { conversationId: conv!.id, reason: "voice message" });
     return { reply: sent, handoff: "voice message" };
   }
@@ -154,7 +156,7 @@ export async function handleInbound(db: Database, queues: Queues, redis: Redis, 
   const agentOn = fresh!.mode === "agent" && settings.agent.enabled && planHas(shop.plan, "agent") && agentAvailable();
   if (!agentOn) return { reply: null, handoff: null };
   if ((await walletBalance(db, shop.id)) < env.AGENT_MIN_BALANCE) {
-    await db.update(conversations).set({ needsHuman: true }).where(eq(conversations.id, conv!.id));
+    await flagForHuman(db, shop.id, conv!.id, "wallet empty");
     await queues.add("notify.handoff", { conversationId: conv!.id, reason: "wallet empty" });
     return { reply: null, handoff: "wallet empty" };
   }
@@ -175,7 +177,7 @@ export async function handleInbound(db: Database, queues: Queues, redis: Redis, 
     result = await runAgent({ name: shop.name, kind: shop.kind, timezone: shop.timezone, settings }, toolCtx, msg.pageContext);
   } catch (err) {
     await db.insert(agentRuns).values({ shopId: shop.id, conversationId: conv!.id, channel: msg.channel, model: agentModel(), tools: toolCtx.toolLog, error: (err as Error).message.slice(0, 500) });
-    await db.update(conversations).set({ needsHuman: true }).where(eq(conversations.id, conv!.id));
+    await flagForHuman(db, shop.id, conv!.id, "agent error");
     throw err;
   }
   const cost = await chargeAi(db, shop.id, result.usage, { type: "conversation", id: conv!.id });
@@ -201,8 +203,9 @@ export async function handleInbound(db: Database, queues: Queues, redis: Redis, 
   });
   await db
     .update(conversations)
-    .set({ lastMessageAt: new Date(), unread: handoff ? fresh!.unread : 0, needsHuman: Boolean(handoff), ...(handoff ? { mode: "human" as const } : {}) })
+    .set({ lastMessageAt: new Date(), unread: handoff ? fresh!.unread : 0, ...(handoff ? {} : { needsHuman: false, status: sql`case when ${conversations.status} = 'needs_human' then 'open' else ${conversations.status} end` }) })
     .where(eq(conversations.id, conv!.id));
+  if (handoff) await flagForHuman(db, shop.id, conv!.id, handoff, { mode: "human" });
 
   if (handoff) await queues.add("notify.handoff", { conversationId: conv!.id, reason: handoff });
   if (handoff && shop.telegramChatId) {
@@ -253,7 +256,8 @@ export async function humanReply(db: Database, shopId: string, conversationId: s
     .insert(messages)
     .values({ shopId, conversationId, direction: "out", sender: "human", text, externalId: ids[0], meta: { userId } })
     .returning();
-  await db.update(conversations).set({ lastMessageAt: new Date(), unread: 0, needsHuman: false }).where(eq(conversations.id, conversationId));
+  await db.update(conversations).set({ lastMessageAt: new Date(), unread: 0 }).where(eq(conversations.id, conversationId));
+  await noteHumanReply(db, shopId, conversationId, userId);
   return m;
 }
 

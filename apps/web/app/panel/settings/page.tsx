@@ -4,6 +4,7 @@ import { Check, Wallet } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Button, Card, ErrorNote, Field, Input, PageHeader, Select, Spinner, Tabs, Textarea, Toggle } from "@/components/ui";
 import { ShebaInput, shebaPayload } from "@/components/sheba-input";
+import { TeamAccess } from "@/components/team-access";
 import { UploadButton } from "@/components/upload";
 import { api, useApi } from "@/lib/api";
 import { date, dateTime, latinDigits, money } from "@/lib/format";
@@ -35,7 +36,7 @@ interface ShopResp {
   shop: { id: string; name: string; kind: string; brandColor: string; logo: string | null; timezone: string; telegramChatId: string | null; settlementIban: string | null; igUsername: string | null; instagramConnected: boolean; instagramOAuth: boolean; igTokenExpiresAt: string | null; walletBalance: number; settings: Settings };
 }
 
-const TABS = ["general", "agent", "booking", "loyalty", "payments", "pricing", "integrations", "wallet"] as const;
+const TABS = ["general", "agent", "booking", "loyalty", "payments", "pricing", "integrations", "team", "wallet"] as const;
 type Tab = (typeof TABS)[number];
 
 export default function SettingsPage() {
@@ -57,6 +58,7 @@ export default function SettingsPage() {
     { value: "payments", label: t("s.payments") },
     ...(shop.kind !== "services" ? [{ value: "pricing" as Tab, label: t("pc.title") }] : []),
     { value: "integrations", label: t("s.integrations") },
+    ...((shop.role === "owner" || shop.role === "admin") && !shop.customRole ? [{ value: "team" as Tab, label: t("s.team") }] : []),
     { value: "wallet", label: t("p.wallet") },
   ];
   return (
@@ -65,7 +67,7 @@ export default function SettingsPage() {
       <div className="mb-4">
         <Tabs value={tab} onChange={setTab} items={tabs} />
       </div>
-      {tab === "wallet" ? <WalletCard /> : <SettingsForm key={tab} tab={tab} data={data} onSaved={() => mutate()} />}
+      {tab === "wallet" ? <WalletCard /> : tab === "team" ? <TeamAccess /> : <SettingsForm key={tab} tab={tab} data={data} onSaved={() => mutate()} />}
     </div>
   );
 }

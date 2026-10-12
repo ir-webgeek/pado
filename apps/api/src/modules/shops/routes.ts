@@ -8,6 +8,7 @@ import {
   resolveShopSettings,
   services,
   shopMembers,
+  shopRoles,
   shops,
   shippingMethods,
   staff,
@@ -15,9 +16,9 @@ import {
   walletTransactions,
   workingHours,
 } from "@shopino/db";
-import { MEMBER_ROLES, PLANS, createShopSchema, normalizeIranPhone, updateShopSettingsSchema } from "@shopino/shared";
+import { BUILTIN_PERMISSIONS, MEMBER_ROLES, PERMISSION_LEVELS, PERMISSION_SECTIONS, PLANS, createShopSchema, normalizeIranPhone, updateShopSettingsSchema } from "@shopino/shared";
 import type { Ctx } from "../../lib/context";
-import { authenticate, invalidateShopCache, requireShop } from "../../lib/auth";
+import { authenticate, invalidateShopCache, requireBuiltinRole, requireShop } from "../../lib/auth";
 import { instagramOAuthConfigured } from "../instagram/oauth";
 import { audit } from "../../lib/audit";
 import { badRequest, conflict, notFound } from "../../lib/errors";
@@ -146,16 +147,76 @@ export const shopRoutes =
     // ---- team
     app.get("/:shopId/members", { preHandler: requireShop(ctx, "admin"), schema: { params: shopParams } }, async (req) => {
       return ctx.db
-        .select({ id: shopMembers.id, role: shopMembers.role, userId: users.id, phone: users.phone, name: users.name })
+        .select({ id: shopMembers.id, role: shopMembers.role, customRoleId: shopMembers.customRoleId, userId: users.id, phone: users.phone, name: users.name })
         .from(shopMembers)
         .innerJoin(users, eq(users.id, shopMembers.userId))
         .where(eq(shopMembers.shopId, req.shop.id));
     });
 
+    // ---- custom team roles (owner/admin): a permission per panel section
+    const permissionsSchema = z.partialRecord(z.enum(PERMISSION_SECTIONS), z.enum(PERMISSION_LEVELS));
+    app.get("/:shopId/roles", { preHandler: requireShop(ctx, "admin"), schema: { params: shopParams } }, async (req) => ({
+      roles: await ctx.db.select().from(shopRoles).where(eq(shopRoles.shopId, req.shop.id)).orderBy(shopRoles.name),
+      builtin: BUILTIN_PERMISSIONS,
+      sections: PERMISSION_SECTIONS,
+    }));
+    app.post(
+      "/:shopId/roles",
+      { preHandler: [requireShop(ctx, "admin"), requireBuiltinRole], schema: { params: shopParams, body: z.object({ name: z.string().trim().min(1).max(60), permissions: permissionsSchema }) } },
+      async (req) => {
+        const [row] = await ctx.db.insert(shopRoles).values({ shopId: req.shop.id, name: req.body.name, permissions: req.body.permissions }).returning();
+        return row;
+      },
+    );
+    app.put(
+      "/:shopId/roles/:roleId",
+      { preHandler: [requireShop(ctx, "admin"), requireBuiltinRole], schema: { params: shopParams.extend({ roleId: z.string().uuid() }), body: z.object({ name: z.string().trim().min(1).max(60), permissions: permissionsSchema }) } },
+      async (req) => {
+        const [row] = await ctx.db
+          .update(shopRoles)
+          .set({ name: req.body.name, permissions: req.body.permissions })
+          .where(and(eq(shopRoles.id, req.params.roleId), eq(shopRoles.shopId, req.shop.id)))
+          .returning();
+        if (!row) throw notFound("role");
+        invalidateShopCache(req.shop.id);
+        return row;
+      },
+    );
+    app.delete("/:shopId/roles/:roleId", { preHandler: [requireShop(ctx, "admin"), requireBuiltinRole], schema: { params: shopParams.extend({ roleId: z.string().uuid() }) } }, async (req) => {
+      await ctx.db.update(shopMembers).set({ customRoleId: null }).where(and(eq(shopMembers.shopId, req.shop.id), eq(shopMembers.customRoleId, req.params.roleId)));
+      await ctx.db.delete(shopRoles).where(and(eq(shopRoles.id, req.params.roleId), eq(shopRoles.shopId, req.shop.id)));
+      invalidateShopCache(req.shop.id);
+      return { ok: true };
+    });
+    app.patch(
+      "/:shopId/members/:memberId",
+      {
+        preHandler: [requireShop(ctx, "admin"), requireBuiltinRole],
+        schema: { params: shopParams.extend({ memberId: z.string().uuid() }), body: z.object({ role: z.enum(MEMBER_ROLES).exclude(["owner"]).optional(), customRoleId: z.string().uuid().nullable().optional() }) },
+      },
+      async (req) => {
+        const member = await ctx.db.query.shopMembers.findFirst({ where: and(eq(shopMembers.id, req.params.memberId), eq(shopMembers.shopId, req.shop.id)) });
+        if (!member) throw notFound("member");
+        if (member.role === "owner") throw badRequest("owner_fixed", "the owner's access cannot be changed");
+        if (req.body.customRoleId) {
+          const role = await ctx.db.query.shopRoles.findFirst({ where: and(eq(shopRoles.id, req.body.customRoleId), eq(shopRoles.shopId, req.shop.id)) });
+          if (!role) throw notFound("role");
+        }
+        const [row] = await ctx.db
+          .update(shopMembers)
+          .set({ ...(req.body.role ? { role: req.body.role } : {}), ...(req.body.customRoleId !== undefined ? { customRoleId: req.body.customRoleId } : {}) })
+          .where(eq(shopMembers.id, member.id))
+          .returning();
+        invalidateShopCache(req.shop.id);
+        await audit(ctx.db, req.shop.id, { type: "user", id: req.user.sub }, "member.access", "member", member.id, req.body);
+        return row;
+      },
+    );
+
     app.post(
       "/:shopId/members",
       {
-        preHandler: requireShop(ctx, "admin"),
+        preHandler: [requireShop(ctx, "admin"), requireBuiltinRole],
         schema: { params: shopParams, body: z.object({ phone: z.string(), role: z.enum(MEMBER_ROLES).exclude(["owner"]), name: z.string().optional() }) },
       },
       async (req) => {

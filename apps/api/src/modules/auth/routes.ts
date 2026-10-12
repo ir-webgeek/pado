@@ -1,7 +1,8 @@
 import type { FastifyReply } from "fastify";
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
 import { and, eq, gt, isNull } from "drizzle-orm";
-import { sessions, shopMembers, shops, users } from "@shopino/db";
+import { sessions, shopMembers, shopRoles, shops, users } from "@shopino/db";
+import { BUILTIN_PERMISSIONS } from "@shopino/shared";
 import { normalizeIranPhone, requestOtpSchema, verifyOtpSchema } from "@shopino/shared";
 import { env, isProd } from "../../config";
 import { requestOtp, verifyOtp } from "../../lib/otp";
@@ -80,11 +81,18 @@ export const authRoutes =
     app.get("/me", { preHandler: authenticate }, async (req) => {
       const user = await ctx.db.query.users.findFirst({ where: eq(users.id, req.user.sub) });
       if (!user) throw unauthorized();
-      const memberships = await ctx.db
-        .select({ id: shops.id, slug: shops.slug, name: shops.name, kind: shops.kind, plan: shops.plan, role: shopMembers.role })
+      const rows = await ctx.db
+        .select({ id: shops.id, slug: shops.slug, name: shops.name, kind: shops.kind, plan: shops.plan, role: shopMembers.role, customRole: shopRoles.name, customPermissions: shopRoles.permissions })
         .from(shopMembers)
         .innerJoin(shops, eq(shops.id, shopMembers.shopId))
+        .leftJoin(shopRoles, eq(shopRoles.id, shopMembers.customRoleId))
         .where(eq(shopMembers.userId, user.id));
+      // effective permissions per shop so the panel shows only what the member can open
+      const memberships = rows.map(({ customRole, customPermissions, ...m }) => ({
+        ...m,
+        customRole: m.role !== "owner" ? customRole : null,
+        permissions: customPermissions && m.role !== "owner" ? { ...BUILTIN_PERMISSIONS.viewer, ...customPermissions } : BUILTIN_PERMISSIONS[m.role],
+      }));
       return { user: { id: user.id, phone: user.phone, name: user.name, isSuperAdmin: user.isSuperAdmin }, shops: memberships };
     });
   };

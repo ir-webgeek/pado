@@ -22,6 +22,7 @@ import { changePoints, recordPurchase, reversePurchase, upsertCustomer } from ".
 import { consumeDiscount, evaluateDiscount } from "../discounts/service";
 import { variantLabel } from "../catalog/service";
 import { lockStock } from "../inventory/pools";
+import { logConversationEvent } from "../inbox/progress";
 
 async function event(db: DbOrTx, orderId: string, type: string, actor: Actor, data?: unknown) {
   await db.insert(orderEvents).values({ orderId, type, actorType: actor.type, actorId: actor.id ?? null, data: data ?? null });
@@ -111,6 +112,7 @@ export async function createOrder(db: Database, queues: Queues, shopId: string, 
       await tx.update(productVariants).set({ reserved: sql`${productVariants.reserved} + ${q}` }).where(eq(productVariants.id, v.id));
     }
     await event(tx, o!.id, "created", actor, { channel: input.channel, items: lines.length });
+    if (conversationId) await logConversationEvent(tx, shopId, conversationId, "order", { code: o!.code, total: o!.total, step: "created" });
     return o!;
   });
 
@@ -238,6 +240,7 @@ export async function markOrderPaid(tx: Tx, orderId: string, actor: Actor, meta:
   }
   if (o.discountCode) await consumeDiscount(tx, o.shopId, o.discountCode);
   await event(tx, o.id, "paid", actor, meta);
+  if (o.conversationId) await logConversationEvent(tx, o.shopId, o.conversationId, "order", { code: o.code, total: o.total, step: "paid" });
   return { order: paid!, alreadyPaid: false };
 }
 

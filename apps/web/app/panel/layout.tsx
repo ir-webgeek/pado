@@ -13,6 +13,7 @@ import {
   ChevronDown,
   ExternalLink,
   LayoutGrid,
+  Lock,
   LogOut,
   MessageCircle,
   MoreHorizontal,
@@ -32,7 +33,8 @@ import { Spinner } from "@/components/ui";
 import { api, useApi } from "@/lib/api";
 import type { DictKey } from "@/lib/i18n";
 import { useI18n } from "@/lib/locale-client";
-import { ShopProvider, useShop, type ShopSummary } from "@/lib/shop";
+import { sectionOfPage } from "@shopino/shared";
+import { ShopProvider, sectionAllowed, useShop, type ShopSummary } from "@/lib/shop";
 
 interface Me {
   user: { id: string; phone: string; name: string | null; isSuperAdmin: boolean };
@@ -136,7 +138,7 @@ export default function PanelLayout({ children }: { children: React.ReactNode })
   }
 
   const visible = groups
-    .map((g) => ({ ...g, items: g.items.filter((i) => !i.kinds || i.kinds.includes(ctx.shop.kind)) }))
+    .map((g) => ({ ...g, items: g.items.filter((i) => (!i.kinds || i.kinds.includes(ctx.shop.kind)) && sectionAllowed(ctx.shop, sectionOfPage(i.href))) }))
     .filter((g) => g.items.length);
   const flat = visible.flatMap((g) => g.items);
   const isActive = (href: string) => (href === "/panel" ? pathname === "/panel" : pathname.startsWith(href));
@@ -207,7 +209,15 @@ export default function PanelLayout({ children }: { children: React.ReactNode })
             </div>
             {/* keyed by route so each page enters with the same soft rise */}
             <div key={pathname} className="animate-rise">
-              {children}
+              {sectionAllowed(ctx.shop, sectionOfPage(pathname)) ? (
+                children
+              ) : (
+                <div className="mx-auto mt-16 max-w-sm text-center">
+                  <Lock className="mx-auto size-8 muted" />
+                  <p className="mt-3 font-semibold strong">{t("role.noAccess")}</p>
+                  <p className="mt-1 text-sm muted">{t("role.noAccessHint").replace("{role}", ctx.shop.customRole ?? "")}</p>
+                </div>
+              )}
             </div>
           </main>
         </div>

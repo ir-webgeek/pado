@@ -1,47 +1,81 @@
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
-import { and, desc, eq, lt, sql } from "drizzle-orm";
+import { and, asc, desc, eq, lt, or, sql } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { z } from "zod";
-import { appointments, conversations, customers, messages, orders, shops } from "@shopino/db";
+import { appointments, conversationEvents, conversations, customers, messages, orders, shopMembers, shops, users } from "@shopino/db";
 import type { Ctx } from "../../lib/context";
 import { invalidateShopCache, requireFeature, requireShop } from "../../lib/auth";
 import { audit } from "../../lib/audit";
 import { badRequest, notFound } from "../../lib/errors";
 import { agentAvailable } from "../agent/agent";
 import { handleInbound, humanReply, recentRuns } from "./pipeline";
+import { CONVERSATION_STATUSES, assignConversation, logConversationEvent, setConversationStatus } from "./progress";
 import { disconnectInstagram } from "../instagram/account";
 
 const params = z.object({ shopId: z.string().uuid() });
 const withId = params.extend({ id: z.string().uuid() });
+const INBOX_FILTERS = ["all", "needs_human", "in_progress", "mine", "resolved", "open", "unread"] as const;
+const assignee = alias(users, "assignee");
 
 export const inboxRoutes =
   (ctx: Ctx): FastifyPluginAsyncZod =>
   async (app) => {
     app.get(
       "/:shopId/conversations",
-      { preHandler: requireShop(ctx, "staff"), schema: { params, querystring: z.object({ filter: z.enum(["all", "needs_human", "unread"]).default("all"), before: z.coerce.date().optional() }) } },
+      { preHandler: requireShop(ctx, "staff"), schema: { params, querystring: z.object({ filter: z.enum(INBOX_FILTERS).default("all"), before: z.coerce.date().optional() }) } },
       async (req) => {
+        const f = req.query.filter;
         const rows = await ctx.db
           .select({
             conv: conversations,
             customerName: customers.name,
             segment: customers.segment,
+            assigneeName: assignee.name,
             lastText: sql<string | null>`(select m.text from messages m where m.conversation_id = ${conversations.id} order by m.created_at desc limit 1)`,
           })
           .from(conversations)
           .leftJoin(customers, eq(customers.id, conversations.customerId))
+          .leftJoin(assignee, eq(assignee.id, conversations.assigneeId))
           .where(
             and(
               eq(conversations.shopId, req.shop.id),
-              req.query.filter === "needs_human" ? eq(conversations.needsHuman, true) : undefined,
-              req.query.filter === "unread" ? sql`${conversations.unread} > 0` : undefined,
+              f === "needs_human" ? or(eq(conversations.status, "needs_human"), eq(conversations.needsHuman, true)) : undefined,
+              f === "in_progress" || f === "resolved" || f === "open" ? eq(conversations.status, f) : undefined,
+              f === "mine" ? and(eq(conversations.assigneeId, req.user.sub), sql`${conversations.status} <> 'resolved'`) : undefined,
+              f === "unread" ? sql`${conversations.unread} > 0` : undefined,
               req.query.before ? lt(conversations.lastMessageAt, req.query.before) : undefined,
             ),
           )
           .orderBy(desc(conversations.lastMessageAt))
           .limit(40);
-        return rows.map((r) => ({ ...r.conv, customerName: r.customerName, segment: r.segment, lastText: r.lastText }));
+        return rows.map((r) => ({ ...r.conv, customerName: r.customerName, segment: r.segment, assigneeName: r.assigneeName, lastText: r.lastText }));
       },
     );
+
+    // pipeline counts for the inbox tabs + who can take a chat
+    app.get("/:shopId/conversations/summary", { preHandler: requireShop(ctx, "staff"), schema: { params } }, async (req) => {
+      const [[counts], team] = await Promise.all([
+        ctx.db
+          .select({
+            open: sql<number>`count(*) filter (where ${conversations.status} = 'open' and not ${conversations.needsHuman})::int`,
+            needsHuman: sql<number>`count(*) filter (where ${conversations.status} = 'needs_human' or (${conversations.needsHuman} and ${conversations.status} <> 'resolved'))::int`,
+            inProgress: sql<number>`count(*) filter (where ${conversations.status} = 'in_progress')::int`,
+            resolved: sql<number>`count(*) filter (where ${conversations.status} = 'resolved')::int`,
+            mine: sql<number>`count(*) filter (where ${conversations.assigneeId} = ${req.user.sub} and ${conversations.status} <> 'resolved')::int`,
+            unread: sql<number>`count(*) filter (where ${conversations.unread} > 0)::int`,
+            oldestWaiting: sql<string | null>`min(${conversations.lastInboundAt}) filter (where ${conversations.status} = 'needs_human')`,
+          })
+          .from(conversations)
+          .where(eq(conversations.shopId, req.shop.id)),
+        ctx.db
+          .select({ userId: users.id, name: users.name, role: shopMembers.role })
+          .from(shopMembers)
+          .innerJoin(users, eq(users.id, shopMembers.userId))
+          .where(eq(shopMembers.shopId, req.shop.id))
+          .orderBy(asc(users.name)),
+      ]);
+      return { counts, team, me: req.user.sub };
+    });
 
     app.get("/:shopId/conversations/:id/messages", { preHandler: requireShop(ctx, "staff"), schema: { params: withId } }, async (req) => {
       const conv = await ctx.db.query.conversations.findFirst({ where: and(eq(conversations.id, req.params.id), eq(conversations.shopId, req.shop.id)) });
@@ -63,8 +97,16 @@ export const inboxRoutes =
           .orderBy(desc(appointments.createdAt))
           .limit(10),
       ]);
+      const events = await ctx.db
+        .select({ id: conversationEvents.id, type: conversationEvents.type, data: conversationEvents.data, createdAt: conversationEvents.createdAt, actorName: users.name, actorId: conversationEvents.actorId })
+        .from(conversationEvents)
+        .leftJoin(users, eq(users.id, conversationEvents.actorId))
+        .where(eq(conversationEvents.conversationId, conv.id))
+        .orderBy(desc(conversationEvents.createdAt))
+        .limit(50);
       return {
         conversation: conv,
+        events: events.reverse(),
         messages: rows.reverse(),
         agentRuns: await recentRuns(ctx.db, conv.id),
         site: { visits: conv.siteVisits, lastAt: conv.lastSiteVisitAt, lastPath: conv.lastSitePath, orders: siteOrders, bookings: siteBookings },
@@ -83,14 +125,38 @@ export const inboxRoutes =
 
     app.patch(
       "/:shopId/conversations/:id",
-      { preHandler: requireShop(ctx, "staff"), schema: { params: withId, body: z.object({ mode: z.enum(["agent", "human"]).optional(), needsHuman: z.boolean().optional() }) } },
+      {
+        preHandler: requireShop(ctx, "staff"),
+        schema: {
+          params: withId,
+          body: z.object({
+            mode: z.enum(["agent", "human"]).optional(),
+            needsHuman: z.boolean().optional(),
+            status: z.enum(CONVERSATION_STATUSES).optional(),
+            assigneeId: z.string().uuid().nullable().optional(),
+          }),
+        },
+      },
       async (req) => {
-        const [row] = await ctx.db
-          .update(conversations)
-          .set(req.body)
-          .where(and(eq(conversations.id, req.params.id), eq(conversations.shopId, req.shop.id)))
-          .returning();
+        const { mode, needsHuman, status, assigneeId } = req.body;
+        const where = and(eq(conversations.id, req.params.id), eq(conversations.shopId, req.shop.id));
+        let row = await ctx.db.query.conversations.findFirst({ where });
         if (!row) throw notFound("conversation");
+        const actor = req.user.sub;
+        if (assigneeId !== undefined) {
+          if (assigneeId) {
+            const member = await ctx.db.query.shopMembers.findFirst({ where: and(eq(shopMembers.shopId, req.shop.id), eq(shopMembers.userId, assigneeId)), columns: { id: true } });
+            if (!member) throw badRequest("invalid_assignee", "that person is not on this shop's team");
+          }
+          row = (await assignConversation(ctx.db, req.shop.id, row.id, assigneeId, actor)) ?? row;
+        }
+        // legacy flag toggle maps onto the pipeline
+        const nextStatus = status ?? (needsHuman === true ? "needs_human" : needsHuman === false && row.status === "needs_human" ? "open" : undefined);
+        if (nextStatus && nextStatus !== row.status) row = (await setConversationStatus(ctx.db, req.shop.id, row.id, nextStatus, actor)) ?? row;
+        if (mode && mode !== row.mode) {
+          [row] = await ctx.db.update(conversations).set({ mode }).where(where).returning();
+          await logConversationEvent(ctx.db, req.shop.id, row!.id, "mode", { mode }, actor);
+        }
         return row;
       },
     );

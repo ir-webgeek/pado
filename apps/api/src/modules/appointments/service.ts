@@ -28,6 +28,7 @@ import {
   type CreateAppointmentInput,
 } from "@shopino/shared";
 import type { Actor } from "../../lib/audit";
+import { logConversationEvent } from "../inbox/progress";
 import { audit } from "../../lib/audit";
 import { randomToken } from "../../lib/crypto";
 import { badRequest, conflict, notFound, paymentRequired } from "../../lib/errors";
@@ -242,6 +243,7 @@ export async function bookAppointment(db: Database, queues: Queues, shopId: stri
       .returning();
     if (input.discountCode && deposit === 0) await consumeDiscount(tx, shopId, input.discountCode.toUpperCase());
     await audit(tx, shopId, actor, "appointment.create", "appointment", appt!.id, { status, deposit });
+    if (opts.conversationId) await logConversationEvent(tx, shopId, opts.conversationId, "booking", { code: appt!.code, startsAt: appt!.startsAt, step: "created" });
     return { appointment: appt!, settings, service: svc };
   });
 
@@ -431,6 +433,7 @@ export async function markAppointmentPaid(tx: Tx, appointmentId: string, amount:
     .where(eq(appointments.id, a.id))
     .returning();
   if (a.discountCode) await consumeDiscount(tx, a.shopId, a.discountCode);
+  if (a.conversationId) await logConversationEvent(tx, a.shopId, a.conversationId, "booking", { code: a.code, startsAt: a.startsAt, step: "paid" });
   return { appt: row!, alreadyPaid: false };
 }
 

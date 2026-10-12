@@ -323,9 +323,24 @@ export const shopMembers = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
     role: memberRole().notNull().default("staff"),
+    /** a custom role from shop_roles replaces the built-in role's permissions (owner excepted) */
+    customRoleId: uuid(),
     createdAt: createdAt(),
   },
   (t) => [uniqueIndex().on(t.shopId, t.userId), index().on(t.userId)],
+);
+
+/** Team roles the owner defines: which panel sections a member can view or edit. */
+export const shopRoles = pgTable(
+  "shop_roles",
+  {
+    id: id(),
+    shopId: shopRef(),
+    name: text().notNull(),
+    permissions: jsonb().$type<Record<string, "none" | "view" | "edit">>().notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [index().on(t.shopId)],
 );
 
 export const auditLogs = pgTable(
@@ -951,6 +966,10 @@ export const conversations = pgTable(
     lastSitePath: text(),
     /** web chat that continues an Instagram DM (opened from a link carrying the DM's uid) */
     linkedConversationId: uuid(),
+    /** handling pipeline: open (bot or waiting) -> needs_human -> in_progress (a person on it) -> resolved */
+    status: text().notNull().default("open"),
+    assigneeId: uuid(),
+    resolvedAt: timestamp({ withTimezone: true }),
     createdAt: createdAt(),
   },
   (t) => [uniqueIndex().on(t.shopId, t.channel, t.externalUserId), index().on(t.shopId, t.lastMessageAt)],
@@ -1197,4 +1216,21 @@ export const igComments = pgTable(
     createdAt: createdAt(),
   },
   (t) => [uniqueIndex().on(t.shopId, t.commentId), index().on(t.shopId, t.mediaId)],
+);
+
+/** Progress of a conversation: handoffs, assignment, replies, sales, resolution (for the timeline). */
+export const conversationEvents = pgTable(
+  "conversation_events",
+  {
+    id: id(),
+    shopId: shopRef(),
+    conversationId: uuid()
+      .notNull()
+      .references(() => conversations.id, { onDelete: "cascade" }),
+    type: text().notNull(), // handoff | assigned | human_reply | status | order | booking | reopened
+    actorId: uuid(),
+    data: jsonb().$type<Record<string, unknown>>(),
+    createdAt: createdAt(),
+  },
+  (t) => [index().on(t.conversationId, t.createdAt)],
 );
