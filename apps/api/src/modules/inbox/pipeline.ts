@@ -25,6 +25,8 @@ export interface InboundMessage {
   storyReplyId?: string;
   /** web consultant: what page the visitor is on (product / service) */
   pageContext?: string;
+  /** web chat continuing this DM conversation (verified uid from the link) */
+  linkedConversationId?: string;
 }
 
 export interface InboundResult {
@@ -65,7 +67,7 @@ export async function handleInbound(db: Database, queues: Queues, redis: Redis, 
   });
   const [conv] = await db
     .insert(conversations)
-    .values({ shopId: shop.id, channel: msg.channel, externalUserId: msg.externalUserId, username: msg.username, customerId: customer?.id, lastInboundAt: new Date() })
+    .values({ shopId: shop.id, channel: msg.channel, externalUserId: msg.externalUserId, username: msg.username, customerId: customer?.id, lastInboundAt: new Date(), linkedConversationId: msg.linkedConversationId })
     .onConflictDoUpdate({
       target: [conversations.shopId, conversations.channel, conversations.externalUserId],
       set: { lastMessageAt: new Date(), lastInboundAt: new Date(), unread: sql`${conversations.unread} + 1`, customerId: sql`coalesce(${conversations.customerId}, excluded.customer_id)` },
@@ -143,6 +145,7 @@ export async function handleInbound(db: Database, queues: Queues, redis: Redis, 
     shopId: shop.id,
     timezone: shop.timezone,
     conversationId: conv!.id,
+    linkedConversationId: conv!.linkedConversationId ?? undefined,
     channel: msg.channel,
     customer: { instagramId: msg.channel === "instagram" ? msg.externalUserId : undefined, name: customer?.name, phone: customer?.phone, username: msg.username },
     toolLog: [] as { name: string; ok: boolean }[],

@@ -1,0 +1,1 @@
+ALTER TABLE "conversations" ADD COLUMN "linked_conversation_id" uuid;

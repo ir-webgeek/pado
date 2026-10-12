@@ -1,6 +1,6 @@
 import type { FastifyRequest } from "fastify";
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
-import { and, asc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import {
   appointments,
@@ -8,6 +8,7 @@ import {
   conversations,
   customers,
   forms,
+  messages,
   orders,
   payments,
   productVariants,
@@ -212,6 +213,34 @@ export const storefrontRoutes =
       };
     });
 
+    /**
+     * Earlier messages for a visitor who came from a DM link (uid): the DM itself plus the web chat that
+     * continues it, so the site widget shows one conversation. The uid is the signed token only that
+     * customer received in their DM.
+     */
+    app.get(
+      "/shops/:slug/assistant/history",
+      { schema: { params: slugParams, querystring: z.object({ ref: z.string().max(120) }) }, config: { rateLimit: { max: 30, timeWindow: "1 minute" } } },
+      async (req) => {
+        const shop = await shopOr404(req.params.slug);
+        const id = await dmConversation(shop.id, req.query.ref);
+        if (!id) return { messages: [] };
+        const web = await ctx.db.query.conversations.findFirst({ where: and(eq(conversations.shopId, shop.id), eq(conversations.linkedConversationId, id)), columns: { id: true } });
+        const rows = await ctx.db
+          .select({ direction: messages.direction, text: messages.text, at: messages.createdAt, conversationId: messages.conversationId })
+          .from(messages)
+          .where(inArray(messages.conversationId, web ? [id, web.id] : [id]))
+          .orderBy(desc(messages.createdAt))
+          .limit(40);
+        return {
+          messages: rows
+            .reverse()
+            .filter((m) => m.text.trim())
+            .map((m) => ({ from: m.direction === "in" ? "me" : "ai", text: m.text, at: m.at, via: m.conversationId === id ? "instagram" : "web" })),
+        };
+      },
+    );
+
     // AI shopping / booking consultant on the storefront and booking pages
     app.post(
       "/shops/:slug/assistant",
@@ -222,6 +251,8 @@ export const storefrontRoutes =
             sessionId: z.string().regex(/^[A-Za-z0-9_-]{12,64}$/),
             text: z.string().min(1).max(1000),
             context: z.object({ productSlug: z.string().max(120).optional(), serviceId: z.string().uuid().optional() }).optional(),
+            /** uid from a DM link: continue that conversation */
+            ref: z.string().max(120).optional(),
           }),
         },
         config: { rateLimit: { max: 15, timeWindow: "1 minute" } },
@@ -238,13 +269,16 @@ export const storefrontRoutes =
           const s = await ctx.db.query.services.findFirst({ where: and(eq(services.shopId, shop.id), eq(services.id, req.body.context.serviceId)) });
           if (s) pageContext = `booking page for service "${s.name}" (serviceId ${s.id})`;
         }
+        const linked = await dmConversation(shop.id, req.body.ref);
         const r = await handleInbound(ctx.db, ctx.queues, ctx.redis, {
           shopId: shop.id,
           channel: "web",
-          externalUserId: `web-${req.body.sessionId}`,
+          // one web chat per DM conversation, whatever device the link is opened on
+          externalUserId: linked ? `web-dm-${linked}` : `web-${req.body.sessionId}`,
           username: "web visitor",
           text: req.body.text,
           pageContext,
+          linkedConversationId: linked,
         });
         return { reply: r.reply, handoff: Boolean(r.handoff) };
       },

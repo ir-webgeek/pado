@@ -5,6 +5,8 @@
  */
 export const DM_UTM = { utm_source: "shopino_dm", utm_medium: "instagram", utm_campaign: "dm" } as const;
 
+/** `uid` (also sent as utm_id) identifies the DM conversation, so the site can continue it. Same signed token as `ref`. */
+
 export function tagUrl(url: string, siteOrigin: string, ref: string): string {
   let u: URL;
   try {
@@ -15,6 +17,7 @@ export function tagUrl(url: string, siteOrigin: string, ref: string): string {
   if (u.origin !== siteOrigin) return url;
   for (const [k, v] of Object.entries(DM_UTM)) if (!u.searchParams.has(k)) u.searchParams.set(k, v);
   u.searchParams.set("ref", ref);
+  u.searchParams.set("utm_id", ref);
   return u.toString();
 }
 

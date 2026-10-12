@@ -28,7 +28,8 @@ export function DmRefTracker() {
   useEffect(() => {
     if (!CUSTOMER_PAGES.test(pathname)) return;
     try {
-      const fromUrl = new URLSearchParams(window.location.search).get("ref");
+      const q = new URLSearchParams(window.location.search);
+      const fromUrl = q.get("ref") ?? q.get("utm_id");
       if (fromUrl) localStorage.setItem(KEY, JSON.stringify({ ref: fromUrl, at: Date.now() }));
       const ref = getDmRef();
       const seen = `dmref-seen:${pathname}`;

@@ -1,5 +1,5 @@
 import type { BetaContentBlockParam, BetaMessageParam, BetaToolResultBlockParam } from "@anthropic-ai/sdk/resources/beta/messages/messages";
-import { desc, eq } from "drizzle-orm";
+import { desc, eq, inArray } from "drizzle-orm";
 import { messages, RAG_SOURCES, type ShopSettings } from "@shopino/db";
 import { env } from "../../config";
 import { searchKnowledge } from "../knowledge/search";
@@ -66,7 +66,7 @@ async function history(ctx: AgentToolContext): Promise<BetaMessageParam[]> {
   const rows = await ctx.db
     .select({ direction: messages.direction, text: messages.text })
     .from(messages)
-    .where(eq(messages.conversationId, ctx.conversationId))
+    .where(ctx.linkedConversationId ? inArray(messages.conversationId, [ctx.conversationId, ctx.linkedConversationId]) : eq(messages.conversationId, ctx.conversationId))
     .orderBy(desc(messages.createdAt))
     .limit(HISTORY);
   const out: { role: "user" | "assistant"; content: string }[] = [];

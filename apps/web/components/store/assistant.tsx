@@ -4,12 +4,15 @@ import clsx from "clsx";
 import { MessageCircle, Send, Sparkles, X } from "lucide-react";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
+import { getDmRef } from "@/components/dm-ref";
 import { api } from "@/lib/api";
 import { useI18n } from "@/lib/locale-client";
 
 interface Msg {
   from: "me" | "ai";
   text: string;
+  /** earlier message from the Instagram DM this chat continues */
+  via?: "instagram" | "web";
 }
 
 function sessionId(slug: string) {
@@ -54,7 +57,17 @@ export function Assistant({ slug, serviceId, mode = "shop" }: { slug: string; se
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const end = useRef<HTMLDivElement>(null);
-  useEffect(() => end.current?.scrollIntoView({ block: "end" }), [msgs.length, busy]);
+  const [ref, setRef] = useState<string | undefined>();
+  useEffect(() => end.current?.scrollIntoView({ block: "end" }), [msgs.length, busy, open]);
+  // visitor came from a DM link: show that conversation and keep talking in it
+  useEffect(() => {
+    const r = getDmRef();
+    if (!r) return;
+    setRef(r);
+    api<{ messages: Msg[] }>(`/public/shops/${slug}/assistant/history?ref=${encodeURIComponent(r)}`)
+      .then((h) => h.messages.length && setMsgs((m) => (m.length ? m : h.messages)))
+      .catch(() => {});
+  }, [slug]);
 
   async function send(e: React.FormEvent) {
     e.preventDefault();
@@ -66,7 +79,7 @@ export function Assistant({ slug, serviceId, mode = "shop" }: { slug: string; se
     try {
       const r = await api<{ reply: string | null }>(`/public/shops/${slug}/assistant`, {
         method: "POST",
-        json: { sessionId: sessionId(slug), text: q, context: productSlug ? { productSlug: decodeURIComponent(productSlug) } : serviceId ? { serviceId } : undefined },
+        json: { sessionId: sessionId(slug), text: q, ref, context: productSlug ? { productSlug: decodeURIComponent(productSlug) } : serviceId ? { serviceId } : undefined },
       });
       setMsgs((m) => [...m, { from: "ai", text: r.reply ?? "…" }]);
     } catch (err) {
@@ -98,6 +111,7 @@ export function Assistant({ slug, serviceId, mode = "shop" }: { slug: string; se
           </div>
           <div className="flex flex-1 flex-col gap-2 overflow-y-auto p-3">
             <div className="max-w-[85%] self-start rounded-2xl bg-[var(--surface-sunken)] px-3 py-2 text-sm strong">{t("chat.hello")}</div>
+            {msgs.some((m) => m.via) && <p className="self-center rounded-full bg-[var(--surface-sunken)] px-3 py-1 text-[11px] muted">{t("chat.fromDm")}</p>}
             {msgs.map((m, i) => (
               <div
                 key={i}

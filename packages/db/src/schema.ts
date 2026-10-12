@@ -863,6 +863,8 @@ export const conversations = pgTable(
     siteVisits: integer().notNull().default(0),
     lastSiteVisitAt: timestamp({ withTimezone: true }),
     lastSitePath: text(),
+    /** web chat that continues an Instagram DM (opened from a link carrying the DM's uid) */
+    linkedConversationId: uuid(),
     createdAt: createdAt(),
   },
   (t) => [uniqueIndex().on(t.shopId, t.channel, t.externalUserId), index().on(t.shopId, t.lastMessageAt)],

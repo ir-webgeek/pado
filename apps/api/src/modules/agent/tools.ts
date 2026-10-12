@@ -17,6 +17,8 @@ export interface AgentToolContext {
   shopId: string;
   timezone: string;
   conversationId: string;
+  /** earlier DM conversation this web chat continues: its messages are part of the history */
+  linkedConversationId?: string;
   customer: { instagramId?: string; name?: string | null; phone?: string | null; username?: string | null };
   channel: "instagram" | "telegram" | "web" | "agent";
   /** set when a tool decides a human must take over */
