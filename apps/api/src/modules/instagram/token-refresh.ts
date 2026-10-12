@@ -24,10 +24,14 @@ export async function refreshInstagramTokens(db: Database) {
   for (const s of due) {
     try {
       const r = await refreshToken(s.token!);
-      await db.update(shops).set({ igAccessToken: r.access_token, igTokenExpiresAt: new Date(Date.now() + r.expires_in * 1000) }).where(eq(shops.id, s.id));
+      await db
+        .update(shops)
+        .set({ igAccessToken: r.access_token, igTokenExpiresAt: new Date(Date.now() + r.expires_in * 1000), igTokenRefreshedAt: new Date(), igLastError: null, igLastErrorAt: null })
+        .where(eq(shops.id, s.id));
       refreshed++;
     } catch (err) {
       console.error(`[instagram] token refresh failed for shop ${s.id}:`, (err as Error).message);
+      await db.update(shops).set({ igLastError: `token refresh: ${(err as Error).message}`.slice(0, 500), igLastErrorAt: new Date() }).where(eq(shops.id, s.id));
     }
   }
   return { due: due.length, refreshed };

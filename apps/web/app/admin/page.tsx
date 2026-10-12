@@ -14,7 +14,7 @@ import { dateTime, money, num } from "@/lib/format";
 import type { DictKey } from "@/lib/i18n";
 import { useI18n } from "@/lib/locale-client";
 
-type Tab = "overview" | "shops" | "bookings" | "dms" | "fees" | "config";
+type Tab = "overview" | "shops" | "bookings" | "dms" | "fees" | "instagram" | "config";
 
 /** Platform super admin: clients (shops), their reservations, and how automated DMs are being handled. */
 export default function AdminPage() {
@@ -56,6 +56,7 @@ export default function AdminPage() {
               { value: "bookings", label: t("ad.bookings") },
               { value: "dms", label: t("ad.dms") },
               { value: "fees", label: t("ad.fees") },
+              { value: "instagram", label: t("adi.tab") },
               { value: "config", label: t("ad.config") },
             ]}
           />
@@ -70,6 +71,7 @@ export default function AdminPage() {
         {tab === "bookings" && <Bookings shopId={shopFilter?.id} />}
         {tab === "dms" && <Dms shopId={shopFilter?.id} />}
         {tab === "fees" && <Fees />}
+        {tab === "instagram" && <InstagramAdmin />}
         {tab === "config" && <PlatformConfig />}
       </main>
     </div>
@@ -494,6 +496,199 @@ function PlatformConfig() {
           {t("a.save")}
         </Button>
       </div>
+    </div>
+  );
+}
+
+interface IgAdmin {
+  setup: {
+    redirectUri: string;
+    webhookUrl: string;
+    verifyToken: string | null;
+    scopes: string[];
+    webhookFields: string[];
+    graphVersion: string;
+    appIdSet: boolean;
+    appSecretSet: boolean;
+    signatureSecretSet: boolean;
+    httpsPublicUrl: boolean;
+    oauthConfigured: boolean;
+  };
+  webhook: { lastAt: string | null; today: number; yesterday: number };
+  accounts: {
+    shopId: string;
+    shopName: string;
+    slug: string;
+    plan: string;
+    igUserId: string;
+    username: string | null;
+    profile: { pictureUrl: string | null; followers: number | null } | null;
+    connectedAt: string | null;
+    subscribedAt: string | null;
+    lastEventAt: string | null;
+    lastError: string | null;
+    lastErrorAt: string | null;
+    token: { expiresAt: string | null; daysLeft: number | null; refreshedAt: string | null; health: "ok" | "expiring" | "expired" | "unknown" };
+  }[];
+}
+
+/** Instagram API: the values to paste into the Meta app, a self-test, and every connected account with its token and webhook state. */
+function InstagramAdmin() {
+  const { t, locale } = useI18n();
+  const { data, mutate } = useApi<IgAdmin>("/admin/instagram");
+  const [busy, setBusy] = useState<string | null>(null);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [checks, setChecks] = useState<{ key: string; ok: boolean; detail?: string }[] | null>(null);
+  if (!data) return <Spinner />;
+  const run = async (key: string, fn: () => Promise<unknown>, okText?: string) => {
+    setBusy(key);
+    setMsg(null);
+    try {
+      await fn();
+      await mutate();
+      if (okText) setMsg({ ok: true, text: okText });
+    } catch (e) {
+      setMsg({ ok: false, text: (e as Error).message });
+    } finally {
+      setBusy(null);
+    }
+  };
+  const s = data.setup;
+  const copyRows: [string, string | null][] = [
+    [t("adi.redirectUri"), s.redirectUri],
+    [t("adi.webhookUrl"), s.webhookUrl],
+    [t("adi.verifyToken"), s.verifyToken],
+    [t("adi.scopes"), s.scopes.join(",")],
+    [t("adi.fields"), s.webhookFields.join(",")],
+  ];
+  const tone = { ok: "success", expiring: "warning", expired: "danger", unknown: "neutral" } as const;
+  return (
+    <div className="space-y-4">
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_20rem]">
+        <Card className="space-y-3">
+          <h3 className="font-semibold strong">{t("adi.setup")}</h3>
+          <p className="text-xs muted">{t("adi.setupSub")}</p>
+          {copyRows.map(([label, value]) => (
+            <div key={label}>
+              <span className="label">{label}</span>
+              <div className="flex items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface-sunken)] p-1.5 ps-3">
+                <span className="min-w-0 flex-1 truncate font-mono text-xs strong" dir="ltr">{value ?? "-"}</span>
+                {value && (
+                  <Button size="sm" onClick={() => void navigator.clipboard.writeText(value)}>
+                    {t("a.copy")}
+                  </Button>
+                )}
+              </div>
+            </div>
+          ))}
+          <div className="flex flex-wrap gap-2">
+            <Button size="sm" loading={busy === "token"} onClick={() => run("token", () => api("/admin/instagram/verify-token", { method: "POST" }), t("adi.tokenMade"))}>
+              {t("adi.newToken")}
+            </Button>
+            <Button
+              size="sm"
+              variant="primary"
+              loading={busy === "test"}
+              onClick={() => run("test", async () => setChecks((await api<{ checks: { key: string; ok: boolean; detail?: string }[] }>("/admin/instagram/self-test", { method: "POST" })).checks))}
+            >
+              {t("adi.selfTest")}
+            </Button>
+          </div>
+          {checks && (
+            <ul className="space-y-1 text-sm">
+              {checks.map((c) => (
+                <li key={c.key} className="flex items-center justify-between gap-2">
+                  <span>{t(`adi.check.${c.key}` as DictKey)}</span>
+                  <span className="flex items-center gap-2">
+                    {c.detail && <span className="font-mono text-[11px] muted" dir="ltr">{c.detail}</span>}
+                    <Badge tone={c.ok ? "success" : "danger"}>{c.ok ? "OK" : "!"}</Badge>
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+          <p className="text-xs muted">{t("adi.credsHint")}</p>
+        </Card>
+        <Card className="space-y-3">
+          <h3 className="font-semibold strong">{t("adi.heartbeat")}</h3>
+          <p className="text-sm strong">{data.webhook.lastAt ? `${t("iga.lastEvent")} ${dateTime(data.webhook.lastAt, locale)}` : t("iga.noEvents")}</p>
+          <div className="grid grid-cols-2 gap-2 text-center">
+            <div className="rounded-2xl bg-[var(--surface-sunken)] p-3">
+              <p className="num text-xl font-bold strong">{num(data.webhook.today, locale)}</p>
+              <p className="text-xs muted">{t("adi.today")}</p>
+            </div>
+            <div className="rounded-2xl bg-[var(--surface-sunken)] p-3">
+              <p className="num text-xl font-bold strong">{num(data.webhook.yesterday, locale)}</p>
+              <p className="text-xs muted">{t("adi.yesterday")}</p>
+            </div>
+          </div>
+          <Button size="sm" className="w-full" loading={busy === "due"} onClick={() => run("due", () => api("/admin/instagram/refresh-due", { method: "POST" }), t("rag.queued"))}>
+            {t("adi.refreshDue")}
+          </Button>
+        </Card>
+      </div>
+      {msg && <p className={msg.ok ? "text-sm text-success" : "text-sm text-danger"}>{msg.text}</p>}
+      <Card className="!p-0">
+        <div className="flex items-center justify-between p-4">
+          <h3 className="font-semibold strong">{t("adi.accounts")}</h3>
+          <span className="num text-sm muted">{num(data.accounts.length, locale)}</span>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[860px] text-sm">
+            <thead>
+              <tr className="text-xs muted">
+                {["adi.col.account", "adi.col.shop", "adi.col.token", "adi.col.webhook", "adi.col.error", ""].map((k) => (
+                  <th key={k} className="px-3 py-2 text-start font-normal">
+                    {k ? t(k as DictKey) : ""}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-[var(--border)]">
+              {data.accounts.map((a) => (
+                <tr key={a.shopId}>
+                  <td className="px-3 py-2">
+                    <span className="flex items-center gap-2">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      {a.profile?.pictureUrl ? <img src={a.profile.pictureUrl} alt="" className="size-7 rounded-full" /> : <span className="size-7 rounded-full bg-[var(--surface-sunken)]" />}
+                      <span dir="ltr" className="strong">@{a.username}</span>
+                    </span>
+                  </td>
+                  <td className="px-3 py-2">
+                    {a.shopName} <span className="text-xs uppercase muted">{a.plan}</span>
+                  </td>
+                  <td className="px-3 py-2">
+                    <Badge tone={tone[a.token.health]}>{a.token.daysLeft == null ? t("iga.health.unknown") : `${num(Math.max(0, a.token.daysLeft), locale)} ${t("iga.days")}`}</Badge>
+                  </td>
+                  <td className="px-3 py-2 text-xs muted">{a.lastEventAt ? dateTime(a.lastEventAt, locale) : t("iga.noEvents")}</td>
+                  <td className="max-w-56 truncate px-3 py-2 text-xs text-danger" dir="ltr" title={a.lastError ?? ""}>
+                    {a.lastError ?? ""}
+                  </td>
+                  <td className="px-3 py-2">
+                    <span className="flex flex-wrap justify-end gap-1">
+                      {(["check", "refresh", "resubscribe"] as const).map((act) => (
+                        <Button key={act} size="sm" loading={busy === `${a.shopId}:${act}`} onClick={() => run(`${a.shopId}:${act}`, () => api(`/admin/instagram/accounts/${a.shopId}/${act}`, { method: "POST" }), t("s.saved"))}>
+                          {t(`adi.act.${act}` as DictKey)}
+                        </Button>
+                      ))}
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => {
+                          if (confirm(`${t("ig.disconnect")} @${a.username}?`)) void run(`${a.shopId}:dc`, () => api(`/admin/instagram/accounts/${a.shopId}/disconnect`, { method: "POST" }));
+                        }}
+                      >
+                        {t("ig.disconnect")}
+                      </Button>
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {data.accounts.length === 0 && <p className="p-4 text-sm muted">{t("adi.none")}</p>}
+        </div>
+      </Card>
     </div>
   );
 }

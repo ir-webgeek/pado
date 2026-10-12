@@ -267,7 +267,7 @@ function ConnectStep({ shopId, onNext }: { shopId: string; onNext: () => void })
     setBusy(true);
     setError(null);
     try {
-      const r = await api<{ url: string }>(`/shops/${shopId}/instagram/oauth/start`, { method: "POST" });
+      const r = await api<{ url: string }>(`/shops/${shopId}/instagram/oauth/start`, { method: "POST", json: { returnTo: "onboarding" } });
       window.location.href = r.url;
     } catch (e) {
       setError(e);

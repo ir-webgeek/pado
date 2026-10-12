@@ -8,6 +8,7 @@ import { audit } from "../../lib/audit";
 import { badRequest, notFound } from "../../lib/errors";
 import { agentAvailable } from "../agent/agent";
 import { handleInbound, humanReply, recentRuns } from "./pipeline";
+import { disconnectInstagram } from "../instagram/account";
 
 const params = z.object({ shopId: z.string().uuid() });
 const withId = params.extend({ id: z.string().uuid() });
@@ -119,7 +120,7 @@ export const inboxRoutes =
       async (req) => {
         await ctx.db
           .update(shops)
-          .set({ igUserId: req.body.igUserId, igAccessToken: req.body.accessToken, igUsername: req.body.username })
+          .set({ igUserId: req.body.igUserId, igAccessToken: req.body.accessToken, igUsername: req.body.username, igConnectedAt: new Date(), igTokenRefreshedAt: null, igLastError: null })
           .where(eq(shops.id, req.shop.id));
         invalidateShopCache(req.shop.id);
         await audit(ctx.db, req.shop.id, { type: "user", id: req.user.sub }, "instagram.connect", "shop", req.shop.id, { igUserId: req.body.igUserId });
@@ -127,7 +128,9 @@ export const inboxRoutes =
       },
     );
     app.post("/:shopId/instagram/disconnect", { preHandler: requireShop(ctx, "owner"), schema: { params } }, async (req) => {
-      await ctx.db.update(shops).set({ igUserId: null, igAccessToken: null }).where(eq(shops.id, req.shop.id));
+      await disconnectInstagram(ctx.db, req.shop.id);
+      await audit(ctx.db, req.shop.id, { type: "user", id: req.user.sub }, "instagram.disconnect", "shop", req.shop.id);
+      invalidateShopCache(req.shop.id);
       return { ok: true };
     });
 

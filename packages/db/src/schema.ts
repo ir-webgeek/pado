@@ -138,6 +138,16 @@ export interface ShopSettings {
   };
 }
 
+export interface IgProfile {
+  name: string | null;
+  accountType: string | null;
+  pictureUrl: string | null;
+  followers: number | null;
+  follows: number | null;
+  mediaCount: number | null;
+  fetchedAt: string;
+}
+
 export const RAG_SOURCES = ["manual", "faq", "dm_history", "products", "comments"] as const;
 export type RagSource = (typeof RAG_SOURCES)[number];
 
@@ -234,6 +244,16 @@ export const shops = pgTable(
     igAccessToken: text(),
     /** long-lived Instagram tokens last 60 days; a daily job refreshes them before this */
     igTokenExpiresAt: timestamp({ withTimezone: true }),
+    igConnectedAt: timestamp({ withTimezone: true }),
+    igTokenRefreshedAt: timestamp({ withTimezone: true }),
+    /** when POST /{IG_ID}/subscribed_apps last succeeded (Meta documents no read-back call) */
+    igWebhookSubscribedAt: timestamp({ withTimezone: true }),
+    /** last webhook event received for this account (throttled to once a minute) */
+    igLastEventAt: timestamp({ withTimezone: true }),
+    /** profile snapshot from GET /me (name, picture, followers...) */
+    igProfile: jsonb().$type<IgProfile>(),
+    igLastError: text(),
+    igLastErrorAt: timestamp({ withTimezone: true }),
     /** WooCommerce REST API (read-only key is enough for import) */
     wooUrl: text(),
     wooConsumerKey: text(),

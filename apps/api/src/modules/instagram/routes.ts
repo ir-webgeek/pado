@@ -1,7 +1,9 @@
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
-import { igMedia } from "@shopino/db";
+import { igMedia, shops } from "@shopino/db";
+import { badRequest } from "../../lib/errors";
+import { accountStatus, checkAccount, refreshShopToken, resubscribeWebhooks } from "./account";
 import type { Ctx } from "../../lib/context";
 import { requireFeature, requireShop } from "../../lib/auth";
 import { assertAiReady } from "../agent/llm";
@@ -60,6 +62,22 @@ export const instagramImportRoutes =
       },
       async (req) => importAsProduct(ctx.db, req.shop, req.params.id, req.body, req.user.sub),
     );
+    // ---- connected account management
+    app.get("/:shopId/instagram/account", { preHandler: requireShop(ctx, "staff"), schema: { params } }, async (req) => {
+      const shop = await ctx.db.query.shops.findFirst({ where: eq(shops.id, req.shop.id) });
+      return accountStatus(ctx.db, shop!);
+    });
+    const action = (fn: (shopId: string) => Promise<unknown>) => async (req: { shop: { id: string } }) => {
+      try {
+        return { ok: true, result: await fn(req.shop.id) };
+      } catch (err) {
+        throw badRequest("instagram_error", (err as Error).message);
+      }
+    };
+    app.post("/:shopId/instagram/account/check", { preHandler: requireShop(ctx, "admin"), schema: { params }, config: { rateLimit: { max: 10, timeWindow: "1 minute" } } }, action((id) => checkAccount(ctx.db, id)));
+    app.post("/:shopId/instagram/account/refresh-token", { preHandler: requireShop(ctx, "admin"), schema: { params }, config: { rateLimit: { max: 5, timeWindow: "10 minutes" } } }, action((id) => refreshShopToken(ctx.db, id)));
+    app.post("/:shopId/instagram/account/resubscribe", { preHandler: requireShop(ctx, "admin"), schema: { params }, config: { rateLimit: { max: 5, timeWindow: "10 minutes" } } }, action((id) => resubscribeWebhooks(ctx.db, id)));
+
     app.post("/:shopId/instagram/media/:id/ignore", { preHandler: requireShop(ctx, "staff"), schema: { params: withId } }, async (req) => {
       await ctx.db.update(igMedia).set({ status: "ignored" }).where(and(eq(igMedia.id, req.params.id), eq(igMedia.shopId, req.shop.id)));
       return { ok: true };

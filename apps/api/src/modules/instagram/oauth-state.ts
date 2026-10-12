@@ -9,6 +9,8 @@ export interface IgState {
   userId: string;
   /** also set as an httpOnly cookie on the browser that started the flow (login-CSRF guard) */
   nonce: string;
+  /** panel page to come back to (fixed list, so it is never an open redirect) */
+  ret?: "settings" | "instagram" | "onboarding";
   exp: number;
 }
 

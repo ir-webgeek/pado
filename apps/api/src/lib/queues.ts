@@ -24,6 +24,7 @@ export interface JobPayloads {
   "instagram.analyze": { shopId: string; mediaRowIds: string[] };
   "woocommerce.import": { importId: string };
   "knowledge.autosetup": { shopId: string; fetchComments?: boolean };
+  "instagram.sync-media": { shopId: string };
   "knowledge.nightly": Record<string, never>;
   // inbound
   "ig.message": { shopId: string; igsid: string; mid: string; text: string; attachments?: { type: string; url?: string }[]; storyReplyId?: string };
@@ -49,6 +50,7 @@ const queueOf: Record<JobName, keyof typeof QUEUE_NAMES> = {
   "instagram.analyze": "inbound",
   "woocommerce.import": "inbound",
   "knowledge.autosetup": "inbound",
+  "instagram.sync-media": "inbound",
   "knowledge.nightly": "scheduled",
   "ig.message": "inbound",
   "ig.comment": "inbound",

@@ -1,6 +1,6 @@
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
 import type { FastifyRequest } from "fastify";
-import { and, desc, eq, gte, ilike, lt, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, ilike, isNotNull, lt, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import {
   agentRuns,
@@ -25,6 +25,9 @@ import { TtlCache } from "../../lib/cache";
 import { forbidden, notFound } from "../../lib/errors";
 import { walletMove } from "../wallet/service";
 import { describeSettings, saveSettings } from "../../lib/platform";
+import { randomToken } from "../../lib/crypto";
+import { env } from "../../config";
+import { checkAccount, disconnectInstagram, metaSetup, refreshShopToken, resubscribeWebhooks, tokenState, webhookHeartbeat } from "../instagram/account";
 import { badRequest } from "../../lib/errors";
 
 const adminCache = new TtlCache<boolean>(30_000);
@@ -258,6 +261,89 @@ export const adminRoutes =
         .where(req.query.shopId ? eq(automationEvents.shopId, req.query.shopId) : undefined)
         .orderBy(desc(automationEvents.createdAt))
         .limit(100),
+    );
+
+    // ---- Instagram API: Meta app setup values, webhook heartbeat, every connected account
+    app.get("/instagram", async () => {
+      const rows = await ctx.db
+        .select({
+          shopId: shops.id,
+          shopName: shops.name,
+          slug: shops.slug,
+          plan: shops.plan,
+          igUserId: shops.igUserId,
+          username: shops.igUsername,
+          profile: shops.igProfile,
+          connectedAt: shops.igConnectedAt,
+          expiresAt: shops.igTokenExpiresAt,
+          refreshedAt: shops.igTokenRefreshedAt,
+          subscribedAt: shops.igWebhookSubscribedAt,
+          lastEventAt: shops.igLastEventAt,
+          lastError: shops.igLastError,
+          lastErrorAt: shops.igLastErrorAt,
+        })
+        .from(shops)
+        .where(isNotNull(shops.igUserId))
+        .orderBy(asc(shops.igTokenExpiresAt));
+      return {
+        setup: metaSetup(),
+        webhook: await webhookHeartbeat(ctx.redis),
+        accounts: rows.map((r) => ({ ...r, token: tokenState({ igTokenExpiresAt: r.expiresAt, igTokenRefreshedAt: r.refreshedAt, igConnectedAt: r.connectedAt }) })),
+      };
+    });
+    // Meta calls GET {webhookUrl}?hub.mode=subscribe&hub.verify_token=...&hub.challenge=...; run the same check from here
+    app.post("/instagram/self-test", async () => {
+      const setup = metaSetup();
+      const checks: { key: string; ok: boolean; detail?: string }[] = [
+        { key: "app_id", ok: setup.appIdSet },
+        { key: "app_secret", ok: setup.appSecretSet },
+        { key: "signature_secret", ok: setup.signatureSecretSet },
+        { key: "verify_token", ok: Boolean(setup.verifyToken) },
+        { key: "https", ok: setup.httpsPublicUrl, detail: setup.webhookUrl },
+      ];
+      if (setup.verifyToken) {
+        const challenge = randomToken(8);
+        try {
+          const url = `http://127.0.0.1:${env.API_PORT}/v1/webhooks/instagram?${new URLSearchParams({ "hub.mode": "subscribe", "hub.verify_token": setup.verifyToken, "hub.challenge": challenge })}`;
+          const res = await fetch(url, { signal: AbortSignal.timeout(5000) });
+          const body = await res.text();
+          checks.push({ key: "webhook_verify", ok: res.ok && body === challenge, detail: `HTTP ${res.status}` });
+        } catch (err) {
+          checks.push({ key: "webhook_verify", ok: false, detail: (err as Error).message });
+        }
+      }
+      return { checks };
+    });
+    app.post("/instagram/verify-token", async (req) => {
+      const token = randomToken(24);
+      await saveSettings(ctx.db, { META_VERIFY_TOKEN: token }, req.user.sub);
+      return { verifyToken: token };
+    });
+    app.post("/instagram/refresh-due", async () => {
+      await ctx.queues.add("instagram.refresh-tokens", {}, { jobId: `ig-refresh-${Date.now()}` });
+      return { queued: true };
+    });
+    app.post(
+      "/instagram/accounts/:id/:action",
+      { schema: { params: z.object({ id: z.string().uuid(), action: z.enum(["check", "refresh", "resubscribe", "disconnect"]) }) } },
+      async (req) => {
+        const { id, action } = req.params;
+        try {
+          const result =
+            action === "check"
+              ? await checkAccount(ctx.db, id)
+              : action === "refresh"
+                ? await refreshShopToken(ctx.db, id, { force: true })
+                : action === "resubscribe"
+                  ? await resubscribeWebhooks(ctx.db, id)
+                  : await disconnectInstagram(ctx.db, id);
+          invalidateShopCache(id);
+          await audit(ctx.db, id, { type: "user", id: req.user.sub }, `admin.instagram_${action}`, "shop", id);
+          return { ok: true, result };
+        } catch (err) {
+          throw badRequest("instagram_error", (err as Error).message);
+        }
+      },
     );
 
     // platform configuration: API keys, gateway, carriers (secrets are write-only)

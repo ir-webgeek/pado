@@ -21,7 +21,7 @@ import {
 } from "./modules/notifications/notify";
 import { expireOrderIfDue } from "./modules/orders/service";
 import { refreshUsdRateFromSource } from "./modules/pricing/service";
-import { analyzeMedia } from "./modules/instagram/importer";
+import { analyzeMedia, syncMedia } from "./modules/instagram/importer";
 import { refreshInstagramTokens } from "./modules/instagram/token-refresh";
 import { runWooImport } from "./modules/woocommerce/import";
 import { autoSetupKnowledge } from "./modules/knowledge/sync";
@@ -77,6 +77,7 @@ const handlers: Handlers = {
   "instagram.refresh-tokens": () => refreshInstagramTokens(db),
   "woocommerce.import": ({ importId }) => runWooImport(db, importId),
   "knowledge.autosetup": ({ shopId, fetchComments }) => autoSetupKnowledge(db, shopId, { fetchComments }),
+  "instagram.sync-media": ({ shopId }) => syncMedia(db, shopId),
   "knowledge.nightly": async () => {
     // shops that keep auto-learn on get their synced knowledge rebuilt, spread over the queue
     for (const s of await db.select({ id: shops.id, settings: shops.settings }).from(shops)) {

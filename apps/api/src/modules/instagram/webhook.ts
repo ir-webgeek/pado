@@ -7,6 +7,7 @@ import type { Ctx } from "../../lib/context";
 import { verifySignature } from "./client";
 import { cfg } from "../../lib/platform";
 import { storeComment } from "../knowledge/sync";
+import { noteWebhookEvent } from "./account";
 
 interface IgWebhook {
   object?: string;
@@ -61,6 +62,7 @@ export const instagramWebhook =
           shopId = s?.id ?? null;
           shopByIg.set(entry.id, shopId);
         }
+        await noteWebhookEvent(ctx.db, ctx.redis, shopId).catch(() => undefined);
         if (!shopId) continue;
 
         for (const m of entry.messaging ?? []) {

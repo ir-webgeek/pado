@@ -23,7 +23,7 @@ export const SETTINGS: SettingDef[] = [
   { key: "ANTHROPIC_API_KEY", group: "ai", label: { fa: "کلید API هوش مصنوعی (Anthropic)", en: "AI API key (Anthropic)" }, secret: true },
   { key: "AGENT_MODEL", group: "ai", label: { fa: "مدل", en: "Model" } },
   { key: "META_APP_SECRET", group: "meta", label: { fa: "App Secret متا", en: "Meta app secret" }, secret: true },
-  { key: "META_VERIFY_TOKEN", group: "meta", label: { fa: "توکن تایید وب‌هوک", en: "Webhook verify token" }, secret: true },
+  { key: "META_VERIFY_TOKEN", group: "meta", label: { fa: "توکن تایید وب‌هوک", en: "Webhook verify token" } },
   { key: "META_GRAPH_VERSION", group: "meta", label: { fa: "نسخه Graph API", en: "Graph API version" } },
   { key: "INSTAGRAM_APP_ID", group: "meta", label: { fa: "Instagram App ID", en: "Instagram app ID" } },
   { key: "INSTAGRAM_APP_SECRET", group: "meta", label: { fa: "Instagram App Secret", en: "Instagram app secret" }, secret: true },

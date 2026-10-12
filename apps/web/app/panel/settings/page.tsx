@@ -372,7 +372,7 @@ function InstagramConnect({ shop: s, onChanged }: { shop: ShopResp["shop"]; onCh
     setBusy(true);
     setError(null);
     try {
-      const r = await api<{ url: string }>(`/shops/${shop.id}/instagram/oauth/start`, { method: "POST" });
+      const r = await api<{ url: string }>(`/shops/${shop.id}/instagram/oauth/start`, { method: "POST", json: { returnTo: "settings" } });
       window.location.href = r.url;
     } catch (e) {
       setError(e);

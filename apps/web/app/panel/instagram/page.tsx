@@ -8,6 +8,7 @@ import { api, useApi } from "@/lib/api";
 import { latinDigits, money, num } from "@/lib/format";
 import { useI18n } from "@/lib/locale-client";
 import { useShop } from "@/lib/shop";
+import { InstagramAccount } from "@/components/instagram-account";
 
 interface Extracted {
   isProduct: boolean;
@@ -31,7 +32,29 @@ interface Media {
   productId: string | null;
 }
 
-export default function InstagramImportPage() {
+/** Instagram: the connected account (default) and turning posts into products. */
+export default function InstagramPage() {
+  const { t } = useI18n();
+  const [section, setSection] = useState<"account" | "posts">("account");
+  return (
+    <div>
+      <PageHeader title={t("iga.title")} subtitle={t("iga.sub")} />
+      <div className="mb-4">
+        <Tabs
+          value={section}
+          onChange={setSection}
+          items={[
+            { value: "account", label: t("iga.tabAccount") },
+            { value: "posts", label: t("iga.tabPosts") },
+          ]}
+        />
+      </div>
+      {section === "account" ? <InstagramAccount /> : <InstagramImport />}
+    </div>
+  );
+}
+
+function InstagramImport() {
   const { t, locale } = useI18n();
   const { shop } = useShop();
   const [tab, setTab] = useState<"new" | "analyzed" | "imported" | "ignored">("analyzed");
@@ -56,9 +79,8 @@ export default function InstagramImportPage() {
 
   return (
     <div>
-      <PageHeader
-        title={t("p.instagram")}
-        actions={
+      <div className="mb-4 flex flex-wrap justify-end gap-2">
+        {
           <>
             <Button onClick={() => setManual(true)}>
               <Plus className="size-4" /> {t("ig.manual")}
@@ -71,7 +93,7 @@ export default function InstagramImportPage() {
             </Button>
           </>
         }
-      />
+      </div>
       <div className="mb-4">
         <Tabs
           value={tab}
