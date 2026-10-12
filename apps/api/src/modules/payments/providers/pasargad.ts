@@ -1,6 +1,7 @@
 import { createPrivateKey, createSign, randomInt } from "node:crypto";
 import { cfg } from "../../../lib/platform";
 import type { PaymentProvider } from "./types";
+import { resilientFetch } from "../../../lib/http";
 
 /**
  * Pasargad (PEP) IPG, REST API v1, following the bank's official SDK (github.com/pepco-api/nodejs-rest-sdk):
@@ -61,11 +62,14 @@ function creds() {
 
 async function call<T>(path: string, params: Record<string, unknown>, key: string): Promise<T> {
   const body = JSON.stringify(params);
-  const res = await fetch(`${base()}/Api/v1/Payment/${path}`, {
+  const res = await resilientFetch(`${base()}/Api/v1/Payment/${path}`, {
     method: "POST",
     headers: { "content-type": "application/json", accept: "application/json", Sign: signBody(body, key) },
     body,
-    signal: AbortSignal.timeout(30_000),
+    timeoutMs: 30_000,
+    service: "pasargad",
+    // checking and verifying the same invoice can be repeated safely; a token request is not retried
+    idempotent: path !== "GetToken",
   });
   const data = (await res.json().catch(() => null)) as T | null;
   if (!res.ok || !data) throw new Error(`pasargad ${path} failed (${res.status})`);

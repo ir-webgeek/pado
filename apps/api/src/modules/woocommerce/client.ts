@@ -1,4 +1,5 @@
 import { assertPublicHttpsUrl } from "../../lib/safe-url";
+import { resilientFetch } from "../../lib/http";
 
 /**
  * WooCommerce REST API v3 client: GET only, Basic auth over HTTPS with the consumer key/secret, falling
@@ -20,7 +21,8 @@ export async function wooGet<T>(c: WooCreds, path: string, query: Record<string,
   await assertPublicHttpsUrl(c.url);
   const url = new URL(`${storeBase(c.url)}/wp-json/wc/v3/${path}`);
   for (const [k, v] of Object.entries(query)) url.searchParams.set(k, String(v));
-  const attempt = (u: URL, headers: Record<string, string>) => fetch(u, { headers: { accept: "application/json", ...headers }, redirect: "error", signal: AbortSignal.timeout(30_000) });
+  const attempt = (u: URL, headers: Record<string, string>) =>
+    resilientFetch(u, { headers: { accept: "application/json", ...headers }, redirect: "error", timeoutMs: 30_000, service: `woo:${u.host}` });
   let res = await attempt(url, { authorization: `Basic ${Buffer.from(`${c.key}:${c.secret}`).toString("base64")}` });
   if (res.status === 401) {
     const q = new URL(url);

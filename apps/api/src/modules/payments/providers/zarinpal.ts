@@ -1,6 +1,7 @@
 import { env } from "../../../config";
 import type { PaymentProvider } from "./types";
 import { cfg } from "../../../lib/platform";
+import { resilientFetch } from "../../../lib/http";
 
 /**
  * Zarinpal REST v4 adapter.
@@ -11,11 +12,14 @@ import { cfg } from "../../../lib/platform";
 const host = () => (env.ZARINPAL_SANDBOX ? "https://sandbox.zarinpal.com" : "https://payment.zarinpal.com");
 
 async function post<T>(path: string, body: unknown): Promise<T> {
-  const res = await fetch(`${host()}${path}`, {
+  const res = await resilientFetch(`${host()}${path}`, {
     method: "POST",
     headers: { "content-type": "application/json", accept: "application/json" },
     body: JSON.stringify(body),
-    signal: AbortSignal.timeout(15_000),
+    timeoutMs: 15_000,
+    service: "zarinpal",
+    // verify is idempotent for the same authority; a payment request is not retried
+    idempotent: path.includes("verify"),
   });
   return (await res.json()) as T;
 }

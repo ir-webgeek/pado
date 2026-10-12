@@ -3,7 +3,7 @@ import { normalizeIranPhone } from "@shopino/shared";
 import { env, isProd } from "../config";
 import { otpCode, safeEqual, sha256 } from "./crypto";
 import { AppError, badRequest } from "./errors";
-import { sendSms } from "../modules/notifications/sms";
+import { sendOtpSms } from "../modules/notifications/sms";
 
 const OTP_TTL_S = 120;
 
@@ -18,7 +18,7 @@ export async function requestOtp(redis: Redis, rawPhone: string, scope: "staff" 
 
   const code = otpCode();
   await redis.set(`otp:${scope}:${phone}`, JSON.stringify({ h: sha256(code), tries: 0 }), "EX", OTP_TTL_S);
-  await sendSms(phone, `${label}: ${code}`);
+  await sendOtpSms(phone, code, `${label}: ${code}`);
   const echo = env.OTP_DEV_ECHO && !isProd;
   return { phone, ttl: OTP_TTL_S, devCode: echo ? code : undefined };
 }

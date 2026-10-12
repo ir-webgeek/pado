@@ -11,7 +11,7 @@ import { env } from "../config";
  */
 export interface SettingDef {
   key: string;
-  group: "ai" | "meta" | "payment" | "shipping" | "notify";
+  group: "ai" | "meta" | "payment" | "shipping" | "notify" | "sms";
   label: { fa: string; en: string };
   secret?: boolean;
   /** allowed values for a select */
@@ -59,6 +59,16 @@ export const SETTINGS: SettingDef[] = [
   { key: "POSTEX_API_KEY", group: "shipping", label: { fa: "کلید API پستکس", en: "Postex API key" }, secret: true },
   { key: "TIPAX_BASE_URL", group: "shipping", label: { fa: "آدرس API تیپاکس", en: "Tipax API address" }, kind: "url" },
   { key: "TIPAX_API_KEY", group: "shipping", label: { fa: "کلید API تیپاکس", en: "Tipax API key" }, secret: true },
+  { key: "SMS_PROVIDER", group: "sms", label: { fa: "سرویس پیامک", en: "SMS provider" }, options: ["console", "kavenegar"], hint: { fa: "console فقط در لاگ سرور چاپ می‌کند (تست).", en: "console only prints to the server log (testing)." } },
+  { key: "KAVENEGAR_API_KEY", group: "sms", label: { fa: "کلید API کاوه‌نگار", en: "Kavenegar API key" }, secret: true },
+  { key: "KAVENEGAR_SENDER", group: "sms", label: { fa: "شماره خط ارسال کاوه‌نگار", en: "Kavenegar sender line" }, hint: { fa: "خالی = خط پیش‌فرض حساب.", en: "Empty = the account's default line." } },
+  {
+    key: "KAVENEGAR_OTP_TEMPLATE",
+    group: "sms",
+    label: { fa: "قالب کد تایید (Verify Lookup)", en: "OTP template (Verify Lookup)" },
+    hint: { fa: "نام قالب تاییدشده در پنل کاوه‌نگار؛ کدهای ورود با این قالب ارسال می‌شوند.", en: "Approved template name in Kavenegar; login codes are sent with it." },
+  },
+  { key: "KAVENEGAR_BASE_URL", group: "sms", label: { fa: "آدرس API کاوه‌نگار", en: "Kavenegar API address" }, kind: "url", hint: { fa: "پیش‌فرض: https://api.kavenegar.com", en: "Default: https://api.kavenegar.com" } },
   { key: "TELEGRAM_BOT_TOKEN", group: "notify", label: { fa: "توکن ربات تلگرام", en: "Telegram bot token" }, secret: true },
 ];
 const DEFS = new Map(SETTINGS.map((d) => [d.key, d]));

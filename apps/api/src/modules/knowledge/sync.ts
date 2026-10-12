@@ -7,6 +7,7 @@ import { aiAvailable } from "../agent/llm";
 import { normalize } from "../automations/match";
 import { listMedia } from "../instagram/client";
 import { learnFromDms } from "./learn";
+import { resilientFetch } from "../../lib/http";
 
 /**
  * RAG auto-setup. Everything the assistant should "know" without the owner typing it:
@@ -77,9 +78,10 @@ interface GraphComment {
 async function fetchMediaComments(accessToken: string, mediaId: string): Promise<GraphComment[]> {
   const version = cfg("META_GRAPH_VERSION") ?? env.META_GRAPH_VERSION;
   const fields = "id,text,timestamp,username,from,replies{id,text,timestamp,username,from}";
-  const res = await fetch(`https://graph.instagram.com/${version}/${mediaId}/comments?fields=${encodeURIComponent(fields)}&limit=50`, {
+  const res = await resilientFetch(`https://graph.instagram.com/${version}/${mediaId}/comments?fields=${encodeURIComponent(fields)}&limit=50`, {
     headers: { authorization: `Bearer ${accessToken}` },
-    signal: AbortSignal.timeout(20_000),
+    timeoutMs: 20_000,
+    service: "instagram",
   });
   const json = (await res.json().catch(() => ({}))) as { data?: GraphComment[]; error?: { message?: string } };
   if (!res.ok) throw new Error(`instagram comments failed (${res.status}): ${json.error?.message ?? "unknown error"}`);

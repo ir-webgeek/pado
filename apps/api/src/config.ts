@@ -56,7 +56,11 @@ const envSchema = z.object({
   TIPAX_API_KEY: z.string().optional(),
   ZARINPAL_SANDBOX: bool.default(true),
 
-  SMS_PROVIDER: z.enum(["console"]).default("console"),
+  SMS_PROVIDER: z.enum(["console", "kavenegar"]).default("console"),
+  KAVENEGAR_API_KEY: z.string().optional(),
+  KAVENEGAR_SENDER: z.string().optional(),
+  KAVENEGAR_OTP_TEMPLATE: z.string().optional(),
+  KAVENEGAR_BASE_URL: z.string().url().optional(),
   SMS_COST_PER_PART: z.coerce.number().default(150),
 
   UPLOAD_DIR: z.string().default("./uploads"),

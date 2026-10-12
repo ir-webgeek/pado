@@ -418,7 +418,7 @@ function Fees() {
 
 interface SettingRow {
   key: string;
-  group: "ai" | "meta" | "payment" | "shipping" | "notify";
+  group: "ai" | "meta" | "payment" | "shipping" | "notify" | "sms";
   label: { fa: string; en: string };
   hint?: { fa: string; en: string };
   secret?: boolean;
@@ -437,7 +437,7 @@ function PlatformConfig() {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   if (!data) return <Spinner />;
-  const groups = ["ai", "meta", "payment", "shipping", "notify"] as const;
+  const groups = ["ai", "meta", "payment", "sms", "shipping", "notify"] as const;
   const save = async () => {
     setBusy(true);
     setMsg(null);

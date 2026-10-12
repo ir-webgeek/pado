@@ -3,6 +3,7 @@ import { productVariants, resolveShopSettings, shops, type Database } from "@sho
 import { env } from "../../config";
 import { badRequest } from "../../lib/errors";
 import { readPath, tomanFromUsd } from "./usd";
+import { resilientFetch } from "../../lib/http";
 
 /** Recompute every USD-linked variant price for a shop from its current rate. Returns updated count. */
 export async function applyUsdPricing(db: Database, shopId: string): Promise<number> {
@@ -36,7 +37,7 @@ export async function setUsdRate(db: Database, shopId: string, rate: number) {
 /** Optional scheduled refresh from USD_RATE_URL for shops that opted into auto-fetch. */
 export async function refreshUsdRateFromSource(db: Database) {
   if (!env.USD_RATE_URL) return { skipped: true };
-  const res = await fetch(env.USD_RATE_URL, { signal: AbortSignal.timeout(15_000) });
+  const res = await resilientFetch(env.USD_RATE_URL, { timeoutMs: 15_000, service: "usd-rate" });
   if (!res.ok) throw new Error(`rate source responded ${res.status}`);
   const value = readPath(await res.json(), env.USD_RATE_JSON_PATH);
   if (!value) throw new Error(`no numeric rate at ${env.USD_RATE_JSON_PATH}`);

@@ -6,6 +6,7 @@ import { env, publicApiUrl } from "../../config";
 import { cfg } from "../../lib/platform";
 import { IG_SCOPES, IG_WEBHOOK_FIELDS, instagramOAuthConfigured, refreshToken, subscribeWebhooks } from "./oauth";
 import { unwrap } from "./oauth-state";
+import { resilientFetch } from "../../lib/http";
 
 /**
  * Managing a connected Instagram account: profile snapshot, token lifetime, webhook subscription and
@@ -23,7 +24,7 @@ const graph = (path: string) => `https://graph.instagram.com/${cfg("META_GRAPH_V
 
 export async function fetchProfile(token: string): Promise<IgProfile & { igUserId: string; username: string }> {
   const fields = "user_id,username,name,account_type,profile_picture_url,followers_count,follows_count,media_count";
-  const res = await fetch(graph(`me?${new URLSearchParams({ fields, access_token: token })}`), { signal: AbortSignal.timeout(15_000) });
+  const res = await resilientFetch(graph(`me?${new URLSearchParams({ fields, access_token: token })}`), { timeoutMs: 15_000, service: "instagram" });
   const json = (await res.json().catch(() => ({}))) as { error?: { message?: string } };
   if (!res.ok) throw new Error(`instagram profile failed (${res.status}): ${json.error?.message ?? res.statusText}`);
   const me = unwrap<{

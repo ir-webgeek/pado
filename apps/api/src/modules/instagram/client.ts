@@ -1,6 +1,7 @@
 import { env } from "../../config";
 import { hmacSha256Hex, safeEqual } from "../../lib/crypto";
 import { cfg } from "../../lib/platform";
+import { resilientFetch } from "../../lib/http";
 
 /**
  * Instagram API with Instagram Login - messaging.
@@ -18,11 +19,13 @@ export interface IgAccount {
 const graph = (path: string) => `https://graph.instagram.com/${cfg("META_GRAPH_VERSION") ?? env.META_GRAPH_VERSION}/${path}`;
 
 async function post(account: IgAccount, body: unknown, path = `${account.igUserId}/messages`) {
-  const res = await fetch(graph(path), {
+  // sends are not retried (the customer would get the message twice); the breaker still protects the queue
+  const res = await resilientFetch(graph(path), {
     method: "POST",
     headers: { authorization: `Bearer ${account.accessToken}`, "content-type": "application/json" },
     body: JSON.stringify(body),
-    signal: AbortSignal.timeout(15_000),
+    timeoutMs: 15_000,
+    service: "instagram",
   });
   const json = (await res.json().catch(() => ({}))) as { message_id?: string; id?: string; error?: { message?: string; code?: number } };
   if (!res.ok) throw new Error(`instagram send failed (${res.status}): ${json.error?.message ?? "unknown error"}`);
@@ -110,7 +113,7 @@ export async function listMedia(account: IgAccount, limit = 50): Promise<IgMedia
   const out: IgMediaItem[] = [];
   let url: string | undefined = `${graph(`${account.igUserId}/media`)}?fields=${encodeURIComponent(fields)}&limit=25`;
   while (url && out.length < limit) {
-    const res = await fetch(url, { headers: { authorization: `Bearer ${account.accessToken}` }, signal: AbortSignal.timeout(20_000) });
+    const res = await resilientFetch(url, { headers: { authorization: `Bearer ${account.accessToken}` }, timeoutMs: 20_000, service: "instagram" });
     const json = (await res.json()) as { data?: IgMediaItem[]; paging?: { next?: string }; error?: { message?: string } };
     if (!res.ok) throw new Error(`instagram media list failed (${res.status}): ${json.error?.message ?? "unknown error"}`);
     out.push(...(json.data ?? []));

@@ -1,6 +1,7 @@
 import { env } from "../../config";
 import { buildAuthorizeUrl, unwrap } from "./oauth-state";
 import { cfg } from "../../lib/platform";
+import { resilientFetch } from "../../lib/http";
 
 /**
  * Instagram API with Instagram Login - business login (OAuth). Endpoints and parameters follow Meta's
@@ -23,7 +24,8 @@ const graph = (path: string) => `https://graph.instagram.com/${cfg("META_GRAPH_V
 export const authorizeUrl = (redirectUri: string, state: string) => buildAuthorizeUrl(cfg("INSTAGRAM_APP_ID") ?? "", redirectUri, IG_SCOPES, state);
 
 async function call<T extends object>(url: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(url, { ...init, signal: AbortSignal.timeout(15_000) });
+  // the code exchange is single-use (not retried); token refresh / account reads are GETs and retried
+  const res = await resilientFetch(url, { ...init, timeoutMs: 15_000, service: "instagram-oauth" });
   const json = (await res.json().catch(() => ({}))) as { error?: { message?: string } | string; error_message?: string };
   if (!res.ok) {
     const msg = json.error_message ?? (typeof json.error === "string" ? json.error : json.error?.message) ?? res.statusText;
