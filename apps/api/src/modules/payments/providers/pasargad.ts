@@ -1,21 +1,109 @@
+import { createPrivateKey, createSign, randomInt } from "node:crypto";
+import { cfg } from "../../../lib/platform";
 import type { PaymentProvider } from "./types";
 
 /**
- * Pasargad (PEP) "Dorsa" shared gateway with payment splitting (تسهیم) - PLACEHOLDER.
- *
- * Plan: the shop's share goes to the merchant's Sheba and the platform commission (PLATFORM_FEE_PERCENT)
- * to the platform Sheba in the same transaction, using the splits passed in PaymentRequest.splits.
- * The official API docs/SDKs (pep.co.ir/developers, github.com/pepco-api) were not reachable while this
- * was written, so no request shapes are guessed here. Implement request/verify against the official
- * docs, then set PAYMENT_PROVIDER=pasargad.
+ * Pasargad (PEP) IPG, REST API v1, following the bank's official SDK (github.com/pepco-api/nodejs-rest-sdk):
+ * - POST {base}/Api/v1/Payment/GetToken, then redirect to {base}/payment.aspx?n=Token
+ * - the bank returns with ?IN=invoiceNumber&ID=invoiceDate&tref=transactionReferenceID
+ * - POST CheckTransactionResult (IsSuccess), then VerifyPayment (IsSuccess) to keep the money
+ * Every request body is signed with the merchant's RSA private key (SHA1, base64) in a `Sign` header.
+ * Amounts are sent in Rial (we store Toman), as with the other Shaparak gateways here.
+ * The v1 API has no split (تسهیم) fields, so the platform fee stays recorded on the payment for settlement.
  */
+const ACTION_PAYMENT = 1003;
+const base = () => (cfg("PASARGAD_BASE_URL") ?? "https://pep.shaparak.ir").replace(/\/+$/, "");
+
+/** The bank issues the key in .NET XML form (<RSAKeyValue><Modulus>...); Node takes it via JWK. */
+export function xmlKeyToPrivateKey(xml: string) {
+  const tag = (name: string) => {
+    const m = xml.match(new RegExp(`<${name}>([^<]+)</${name}>`));
+    if (!m) throw new Error(`pasargad private key: <${name}> missing`);
+    return Buffer.from(m[1]!.trim(), "base64").toString("base64url");
+  };
+  return createPrivateKey({
+    key: { kty: "RSA", n: tag("Modulus"), e: tag("Exponent"), d: tag("D"), p: tag("P"), q: tag("Q"), dp: tag("DP"), dq: tag("DQ"), qi: tag("InverseQ") },
+    format: "jwk",
+  });
+}
+
+export function signBody(body: string, xmlKey: string) {
+  const s = createSign("SHA1");
+  s.update(body);
+  return s.sign(xmlKeyToPrivateKey(xmlKey), "base64");
+}
+
+/** "YYYY/MM/DD HH:mm:ss" for invoiceDate, "YYYY-MM-DD HH:mm:ss" for timeStamp, Tehran time as the bank expects. */
+function tehran(d: Date, sep: "/" | "-") {
+  const p = Object.fromEntries(
+    new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Tehran", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" })
+      .formatToParts(d)
+      .map((x) => [x.type, x.value]),
+  );
+  return `${p.year}${sep}${p.month}${sep}${p.day} ${p.hour}:${p.minute}:${p.second}`;
+}
+
+function creds() {
+  const merchantCode = cfg("PASARGAD_MERCHANT_CODE");
+  const terminalCode = cfg("PASARGAD_TERMINAL");
+  const key = cfg("PASARGAD_PRIVATE_KEY");
+  if (!merchantCode || !terminalCode || !key) throw new Error("Pasargad gateway is not configured (super admin > platform settings)");
+  return { merchantCode, terminalCode, key };
+}
+
+async function call<T>(path: string, params: Record<string, unknown>, key: string): Promise<T> {
+  const body = JSON.stringify(params);
+  const res = await fetch(`${base()}/Api/v1/Payment/${path}`, {
+    method: "POST",
+    headers: { "content-type": "application/json", accept: "application/json", Sign: signBody(body, key) },
+    body,
+    signal: AbortSignal.timeout(30_000),
+  });
+  const data = (await res.json().catch(() => null)) as T | null;
+  if (!res.ok || !data) throw new Error(`pasargad ${path} failed (${res.status})`);
+  return data;
+}
+
 export const pasargadProvider: PaymentProvider = {
   name: "pasargad",
-  supportsSplit: true,
-  async request() {
-    throw new Error("pasargad provider is not implemented yet - see providers/pasargad.ts");
+  supportsSplit: false,
+  async request(req) {
+    const c = creds();
+    const invoiceNumber = `${Date.now()}${randomInt(100, 1000)}`;
+    const invoiceDate = tehran(new Date(), "/");
+    const r = await call<{ IsSuccess?: boolean; Token?: string; Message?: string }>(
+      "GetToken",
+      {
+        amount: req.amount * 10,
+        invoiceNumber,
+        invoiceDate,
+        action: ACTION_PAYMENT,
+        merchantCode: c.merchantCode,
+        terminalCode: c.terminalCode,
+        redirectAddress: req.callbackUrl,
+        timeStamp: tehran(new Date(), "-"),
+      },
+      c.key,
+    );
+    if (!r.Token) throw new Error(`pasargad token failed: ${r.Message ?? "no token"}`);
+    // authority keeps what verification needs: invoice number and date
+    return { authority: `${invoiceNumber}|${invoiceDate}`, redirectUrl: `${base()}/payment.aspx?n=${encodeURIComponent(r.Token)}` };
   },
-  async verify() {
-    throw new Error("pasargad provider is not implemented yet - see providers/pasargad.ts");
+  async verify({ authority, amount, query }) {
+    const [invoiceNumber, invoiceDate] = authority.split("|");
+    if (!query.tref || query.IN !== invoiceNumber) return { ok: false, raw: { reason: "callback mismatch", query } };
+    const c = creds();
+    const check = await call<{ IsSuccess?: boolean; Amount?: number; ReferenceNumber?: number | string }>(
+      "CheckTransactionResult",
+      { transactionReferenceID: query.tref, invoiceNumber, invoiceDate, merchantCode: c.merchantCode, terminalCode: c.terminalCode },
+      c.key,
+    );
+    if (!check.IsSuccess || Number(check.Amount) !== amount * 10) return { ok: false, raw: check };
+    const v = await call<{ IsSuccess?: boolean; ShaparakRefNumber?: string }>(
+      "VerifyPayment",
+      { amount: amount * 10, invoiceNumber, invoiceDate, merchantCode: c.merchantCode, terminalCode: c.terminalCode, timeStamp: tehran(new Date(), "-") },
+      c.key,
+    );
+    return { ok: Boolean(v.IsSuccess), refId: v.ShaparakRefNumber ?? (check.ReferenceNumber != null ? String(check.ReferenceNumber) : undefined), raw: { check, verify: v } };
   },
 };

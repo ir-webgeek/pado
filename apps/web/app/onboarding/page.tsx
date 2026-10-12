@@ -6,14 +6,15 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { Logo } from "@/components/logo";
 import { Button, ErrorNote, Field, Input } from "@/components/ui";
+import { ShebaInput, shebaPayload } from "@/components/sheba-input";
 import { UploadButton } from "@/components/upload";
-import { api } from "@/lib/api";
+import { api, useApi } from "@/lib/api";
 import { latinDigits } from "@/lib/format";
 import type { DictKey } from "@/lib/i18n";
 import { useI18n } from "@/lib/locale-client";
 
 type Kind = "retail" | "services" | "hybrid";
-const STEPS = ["business", "brand", "contact", "done"] as const;
+const STEPS = ["business", "brand", "contact", "connect", "done"] as const;
 const BRAND_COLORS = ["#0b7a6d", "#5b4fa8", "#1a1631", "#c2410c", "#be185d", "#0369a1", "#15803d", "#a16207"];
 
 /** First-run wizard: create the shop, then brand, contact/payment and the links to share. */
@@ -47,7 +48,8 @@ export default function OnboardingPage() {
           )}
           {step === 1 && shop && <BrandStep shopId={shop.id} onNext={() => setStep(2)} />}
           {step === 2 && shop && <ContactStep shopId={shop.id} kind={shop.kind} onBack={() => setStep(1)} onNext={() => setStep(3)} />}
-          {step === 3 && shop && <DoneStep slug={shop.slug} kind={shop.kind} />}
+          {step === 3 && shop && <ConnectStep shopId={shop.id} onNext={() => setStep(4)} />}
+          {step === 4 && shop && <DoneStep slug={shop.slug} kind={shop.kind} />}
         </div>
       </div>
     </div>
@@ -58,7 +60,14 @@ function BusinessStep({ onCreated }: { onCreated: (s: { id: string; slug: string
   const { t } = useI18n();
   const [name, setName] = useState("");
   const [slug, setSlug] = useState("");
+  const [slugTouched, setSlugTouched] = useState(false);
   const [kind, setKind] = useState<Kind>("retail");
+  // suggest the address from a Latin shop name until the owner types one
+  useEffect(() => {
+    if (slugTouched) return;
+    const auto = name.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40);
+    if (auto.length >= 3) setSlug(auto);
+  }, [name, slugTouched]);
   const [available, setAvailable] = useState<boolean | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<unknown>(null);
@@ -100,7 +109,7 @@ function BusinessStep({ onCreated }: { onCreated: (s: { id: string; slug: string
         <Input value={name} onChange={(e) => setName(e.target.value)} required minLength={2} autoFocus />
       </Field>
       <Field label={t("onb.slug")} hint={available === false ? t("onb.slugTaken") : available ? t("onb.slugOk") : `${slug || "my-shop"}.shopino.ir`}>
-        <Input dir="ltr" value={slug} onChange={(e) => setSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ""))} required minLength={3} aria-invalid={available === false} />
+        <Input dir="ltr" value={slug} onChange={(e) => (setSlugTouched(true), setSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, "")))} required minLength={3} aria-invalid={available === false} />
       </Field>
       <div>
         <span className="label">{t("onb.kind")}</span>
@@ -187,6 +196,8 @@ function ContactStep({ shopId, kind, onBack, onNext }: { shopId: string; kind: K
   const [phone, setPhone] = useState("");
   const [address, setAddress] = useState("");
   const [card, setCard] = useState({ cardNumber: "", holder: "", bank: "" });
+  const [sheba, setSheba] = useState("");
+  const { data: platform } = useApi<{ demoGateway: boolean }>("/platform/status");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const save = async () => {
@@ -198,6 +209,7 @@ function ContactStep({ shopId, kind, onBack, onNext }: { shopId: string; kind: K
         json: {
           invoice: { phone: latinDigits(phone), address },
           ...(card.cardNumber ? { cardToCard: { ...card, cardNumber: latinDigits(card.cardNumber).replace(/\D/g, "") } } : {}),
+          ...(sheba.trim() ? { settlementIban: shebaPayload(sheba) } : {}),
         },
       });
       onNext();
@@ -220,6 +232,8 @@ function ContactStep({ shopId, kind, onBack, onNext }: { shopId: string; kind: K
           <Input value={address} maxLength={300} onChange={(e) => setAddress(e.target.value)} />
         </Field>
       )}
+      <ShebaInput value={sheba} onChange={setSheba} />
+      {platform?.demoGateway && <p className="rounded-xl bg-[var(--surface-sunken)] px-3 py-2 text-xs muted">{t("onb.demoGateway")}</p>}
       <Field label={t("s.card")}>
         <Input dir="ltr" inputMode="numeric" placeholder="6037 ...." value={card.cardNumber} maxLength={19} onChange={(e) => setCard({ ...card, cardNumber: e.target.value })} />
       </Field>
@@ -238,6 +252,50 @@ function ContactStep({ shopId, kind, onBack, onNext }: { shopId: string; kind: K
         <Button variant="ghost" onClick={onBack}>{t("onb.back")}</Button>
         <Button variant="ghost" onClick={onNext}>{t("onb.skip")}</Button>
         <Button variant="primary" className="flex-1" loading={busy} onClick={save}>{t("onb.next")}</Button>
+      </div>
+    </div>
+  );
+}
+
+/** Instagram + AI: the two things that make the assistant useful. Both can be done later from settings. */
+function ConnectStep({ shopId, onNext }: { shopId: string; onNext: () => void }) {
+  const { t } = useI18n();
+  const { data: platform } = useApi<{ ai: boolean; instagramOAuth: boolean }>("/platform/status");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<unknown>(null);
+  const connect = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const r = await api<{ url: string }>(`/shops/${shopId}/instagram/oauth/start`, { method: "POST" });
+      window.location.href = r.url;
+    } catch (e) {
+      setError(e);
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="space-y-4">
+      <div>
+        <h2 className="text-lg font-bold strong">{t("onb.connect.t")}</h2>
+        <p className="mt-1 text-sm muted">{t("onb.connect.s")}</p>
+      </div>
+      <ol className="space-y-2 text-sm">
+        {(["onb.connect.1", "onb.connect.2", "onb.connect.3"] as const).map((k, i) => (
+          <li key={k} className="flex gap-2">
+            <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-gold/15 text-[11px] text-[var(--accent)]">{i + 1}</span>
+            <span>{t(k)}</span>
+          </li>
+        ))}
+      </ol>
+      {platform && !platform.instagramOAuth && <p className="text-xs text-warning">{t("ig.notConfigured")}</p>}
+      {platform && !platform.ai && <p className="text-xs text-warning">{t("onb.aiOff")}</p>}
+      <ErrorNote error={error} />
+      <div className="flex gap-2">
+        <Button variant="ghost" onClick={onNext}>{t("onb.later")}</Button>
+        <Button variant="primary" className="flex-1" loading={busy} disabled={!platform?.instagramOAuth} onClick={connect}>
+          {t("ig.connectBtn")}
+        </Button>
       </div>
     </div>
   );

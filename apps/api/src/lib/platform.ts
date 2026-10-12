@@ -15,7 +15,7 @@ export interface SettingDef {
   secret?: boolean;
   /** allowed values for a select */
   options?: string[];
-  kind?: "url" | "number" | "text";
+  kind?: "url" | "number" | "text" | "multiline";
   hint?: { fa: string; en: string };
 }
 
@@ -34,10 +34,23 @@ export const SETTINGS: SettingDef[] = [
     options: ["mock", "pasargad", "zarinpal"],
     hint: { fa: "mock یعنی درگاه دمو برای تست، تا درگاه واقعی راه بیفتد.", en: "mock is the demo gateway for testing until the real one is set up." },
   },
-  { key: "PASARGAD_BASE_URL", group: "payment", label: { fa: "آدرس API پاسارگاد", en: "Pasargad API address" }, kind: "url" },
-  { key: "PASARGAD_TERMINAL", group: "payment", label: { fa: "شماره ترمینال پاسارگاد", en: "Pasargad terminal number" } },
-  { key: "PASARGAD_USERNAME", group: "payment", label: { fa: "نام کاربری پاسارگاد", en: "Pasargad username" } },
-  { key: "PASARGAD_PASSWORD", group: "payment", label: { fa: "رمز پاسارگاد", en: "Pasargad password" }, secret: true },
+  {
+    key: "PASARGAD_BASE_URL",
+    group: "payment",
+    label: { fa: "آدرس درگاه پاسارگاد", en: "Pasargad gateway address" },
+    kind: "url",
+    hint: { fa: "پیش‌فرض: https://pep.shaparak.ir", en: "Default: https://pep.shaparak.ir" },
+  },
+  { key: "PASARGAD_MERCHANT_CODE", group: "payment", label: { fa: "کد پذیرنده پاسارگاد", en: "Pasargad merchant code" } },
+  { key: "PASARGAD_TERMINAL", group: "payment", label: { fa: "کد ترمینال پاسارگاد", en: "Pasargad terminal code" } },
+  {
+    key: "PASARGAD_PRIVATE_KEY",
+    group: "payment",
+    label: { fa: "کلید خصوصی پاسارگاد (XML)", en: "Pasargad private key (XML)" },
+    secret: true,
+    kind: "multiline",
+    hint: { fa: "محتوای فایل کلید <RSAKeyValue> که بانک داده است.", en: "Contents of the <RSAKeyValue> key file issued by the bank." },
+  },
   { key: "ZARINPAL_MERCHANT_ID", group: "payment", label: { fa: "مرچنت زرین‌پال", en: "Zarinpal merchant ID" }, secret: true },
   { key: "PLATFORM_IBAN", group: "payment", label: { fa: "شبای پلتفرم (سهم کارمزد در تسهیم)", en: "Platform Sheba (fee share in splits)" } },
   { key: "PLATFORM_FEE_PERCENT", group: "payment", label: { fa: "کارمزد پلتفرم (درصد)", en: "Platform fee (%)" }, kind: "number" },

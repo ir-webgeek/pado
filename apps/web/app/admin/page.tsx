@@ -8,7 +8,7 @@ import { useEffect, useState } from "react";
 import { PLAN_IDS } from "@shopino/shared";
 import { Logo } from "@/components/logo";
 import { LangToggle, ThemeToggle } from "@/components/prefs";
-import { Badge, Button, Card, Input, Modal, Select, Spinner, Tabs, statusTone } from "@/components/ui";
+import { Badge, Button, Card, Input, Modal, Select, Spinner, Tabs, Textarea, statusTone } from "@/components/ui";
 import { api, useApi } from "@/lib/api";
 import { dateTime, money, num } from "@/lib/format";
 import type { DictKey } from "@/lib/i18n";
@@ -418,7 +418,7 @@ interface SettingRow {
   hint?: { fa: string; en: string };
   secret?: boolean;
   options?: string[];
-  kind?: "url" | "number" | "text";
+  kind?: "url" | "number" | "text" | "multiline";
   source: "panel" | "env" | "unset";
   value: string | null;
   preview: string | null;
@@ -470,6 +470,8 @@ function PlatformConfig() {
                         </option>
                       ))}
                     </Select>
+                  ) : s.kind === "multiline" ? (
+                    <Textarea dir="ltr" rows={3} placeholder={s.preview ?? ""} value={draft[s.key] ?? ""} onChange={(e) => setDraft({ ...draft, [s.key]: e.target.value })} />
                   ) : (
                     <Input
                       dir="ltr"

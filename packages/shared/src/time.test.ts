@@ -65,3 +65,19 @@ describe("phone", () => {
     expect(normalizeIranPhone("12345")).toBeNull();
   });
 });
+
+describe("sheba", () => {
+  it("accepts a valid Sheba in any common spelling and rejects a typo", async () => {
+    const { isValidSheba, normalizeSheba } = await import("./codes");
+    // IR + check digits computed for 22-digit BBAN
+    const bban = "0570000000000000000001";
+    let rem = 0;
+    for (const ch of bban + "182700") rem = (rem * 10 + Number(ch)) % 97;
+    const valid = `IR${String(98 - rem).padStart(2, "0")}${bban}`;
+    expect(isValidSheba(valid)).toBe(true);
+    expect(isValidSheba(valid.toLowerCase().replace(/(.{4})/g, "$1 "))).toBe(true);
+    expect(normalizeSheba(valid.slice(2))).toBe(valid);
+    expect(isValidSheba(valid.slice(0, -1) + "2")).toBe(false);
+    expect(isValidSheba("IR12")).toBe(false);
+  });
+});

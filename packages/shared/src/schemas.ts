@@ -1,3 +1,4 @@
+import { isValidSheba, normalizeSheba } from "./codes";
 import { z } from "zod";
 import { APPOINTMENT_STATUSES, ORDER_STATUSES, PAYMENT_METHODS, SALES_CHANNELS, SHOP_KINDS } from "./enums";
 
@@ -73,7 +74,7 @@ export const updateShopSettingsSchema = z.object({
     .partial()
     .optional(),
   telegramChatId: z.string().max(40).optional(),
-  settlementIban: z.string().regex(/^IR\d{24}$/, "Sheba must look like IR + 24 digits").optional(),
+  settlementIban: z.string().transform(normalizeSheba).refine(isValidSheba, "invalid Sheba number (IR + 24 digits, checksum failed)").optional(),
 });
 
 // ---------- catalog ----------

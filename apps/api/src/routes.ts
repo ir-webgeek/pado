@@ -4,6 +4,10 @@ import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
 import type { Ctx } from "./lib/context";
 import { requireShop } from "./lib/auth";
 import { saveUpload } from "./lib/uploads";
+import { cfg } from "./lib/platform";
+import { env } from "./config";
+import { aiAvailable } from "./modules/agent/llm";
+import { instagramOAuthConfigured } from "./modules/instagram/oauth";
 import { appointmentRoutes } from "./modules/appointments/routes";
 import { authRoutes } from "./modules/auth/routes";
 import { campaignRoutes } from "./modules/campaigns/routes";
@@ -41,6 +45,11 @@ const uploadRoutes =
 export const routes =
   (ctx: Ctx): FastifyPluginAsync =>
   async (app) => {
+    // what is configured platform-wide (no secrets): drives demo-gateway notices and onboarding
+    app.get("/platform/status", async () => {
+      const gateway = cfg("PAYMENT_PROVIDER") ?? env.PAYMENT_PROVIDER;
+      return { gateway, demoGateway: gateway === "mock", ai: aiAvailable(), instagramOAuth: instagramOAuthConfigured() };
+    });
     await app.register(authRoutes(ctx), { prefix: "/auth" });
     // every tenant route lives under /v1/shops/:shopId/...
     for (const r of [

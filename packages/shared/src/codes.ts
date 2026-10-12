@@ -27,3 +27,22 @@ export function normalizeIranPhone(input: string): string | null {
   else if (n.startsWith("0")) n = n.slice(1);
   return /^9\d{9}$/.test(n) ? `+98${n}` : null;
 }
+
+/** Sheba (Iranian IBAN): spaces/dashes removed, upper-cased, Persian digits converted. */
+export function normalizeSheba(raw: string): string {
+  return raw
+    .replace(/[۰-۹]/g, (d) => String("۰۱۲۳۴۵۶۷۸۹".indexOf(d)))
+    .replace(/[\s-]/g, "")
+    .toUpperCase()
+    .replace(/^(?=\d{24}$)/, "IR");
+}
+
+/** ISO 13616 check: IR + 24 digits and the mod-97 checksum, so a mistyped digit is caught before settlement. */
+export function isValidSheba(raw: string): boolean {
+  const s = normalizeSheba(raw);
+  if (!/^IR\d{24}$/.test(s)) return false;
+  const moved = s.slice(4) + "1827" + s.slice(2, 4); // I=18, R=27
+  let rem = 0;
+  for (const ch of moved) rem = (rem * 10 + Number(ch)) % 97;
+  return rem === 1;
+}

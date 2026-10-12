@@ -3,6 +3,7 @@
 import { Check, Wallet } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Button, Card, ErrorNote, Field, Input, PageHeader, Select, Spinner, Tabs, Textarea, Toggle } from "@/components/ui";
+import { ShebaInput, shebaPayload } from "@/components/sheba-input";
 import { UploadButton } from "@/components/upload";
 import { api, useApi } from "@/lib/api";
 import { date, dateTime, latinDigits, money } from "@/lib/format";
@@ -114,7 +115,7 @@ function SettingsForm({ tab, data, onSaved }: { tab: Tab; data: ShopResp; onSave
               : tab === "loyalty"
                 ? { loyalty, vipRule: { minOrders: vip.minOrders, minSpend: vip.minSpend, withinDays: vip.withinDays }, atRiskDays: vip.atRiskDays }
                 : tab === "payments"
-                  ? { cardToCard: card, ...(iban ? { settlementIban: iban.replace(/\s/g, "").toUpperCase() } : {}) }
+                  ? { cardToCard: card, ...(iban ? { settlementIban: shebaPayload(iban) } : {}) }
                   : tab === "pricing"
                     ? { pricing: { usdEnabled: pricing.usdEnabled, markupPercent: pricing.markupPercent, roundTo: pricing.roundTo, autoFetch: pricing.autoFetch } }
                     : { telegramChatId: telegram, alerts: { ...alerts, phone: latinDigits(alerts.phone) } };
@@ -254,9 +255,7 @@ function SettingsForm({ tab, data, onSaved }: { tab: Tab; data: ShopResp; onSave
           <Field label={t("s.card")}>
             <Input dir="ltr" inputMode="numeric" value={card.cardNumber} onChange={(e) => setCard({ ...card, cardNumber: latinDigits(e.target.value).replace(/\D/g, "") })} />
           </Field>
-          <Field label={t("s.iban")} hint="IR + 24 digits">
-            <Input dir="ltr" value={iban} onChange={(e) => setIban(latinDigits(e.target.value))} placeholder="IR000000000000000000000000" />
-          </Field>
+          <ShebaInput value={iban} onChange={setIban} />
           <div className="grid grid-cols-2 gap-3">
             <Field label={t("s.cardHolder")}>
               <Input value={card.holder} onChange={(e) => setCard({ ...card, holder: e.target.value })} />
