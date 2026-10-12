@@ -13,14 +13,15 @@ export function toOrQuery(text: string): string | null {
  * which tokenizes on whitespace) ranked together with trigram similarity for typos and partial words.
  * The query layer is isolated here so an embedding-based retriever can replace it later.
  */
-export async function searchKnowledge(db: DbOrTx, shopId: string, text: string, limit = 4) {
+export async function searchKnowledge(db: DbOrTx, shopId: string, text: string, limit = 4, sources?: readonly string[]) {
   const q = toOrQuery(text);
-  if (!q) return [];
-  const rows = await db.execute<{ id: string; title: string; content: string; score: number }>(sql`
-    SELECT id, title, content,
+  if (!q || (sources && !sources.length)) return [];
+  const sourceFilter = sources ? sql`AND source IN (${sql.join(sources.map((s) => sql`${s}`), sql`, `)})` : sql``;
+  const rows = await db.execute<{ id: string; title: string; content: string; source: string; score: number }>(sql`
+    SELECT id, title, content, source,
       ts_rank(to_tsvector('simple', title || ' ' || content), to_tsquery('simple', ${q})) + similarity(content, ${text}) AS score
     FROM knowledge_entries
-    WHERE shop_id = ${shopId} AND active
+    WHERE shop_id = ${shopId} AND active ${sourceFilter}
       AND (to_tsvector('simple', title || ' ' || content) @@ to_tsquery('simple', ${q}) OR similarity(content, ${text}) > 0.12)
     ORDER BY score DESC
     LIMIT ${limit}`);

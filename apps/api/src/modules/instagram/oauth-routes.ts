@@ -58,6 +58,8 @@ export const instagramOAuthCallbackRoutes =
             .where(eq(shops.id, st.shopId));
           invalidateShopCache(st.shopId);
           await audit(ctx.db, st.shopId, { type: "user", id: st.userId }, "instagram.connect", "shop", st.shopId, { igUserId: me.igUserId, via: "oauth" });
+          // first knowledge build from the freshly connected page (comments, chats, products)
+          await ctx.queues.add("knowledge.autosetup", { shopId: st.shopId }, { jobId: `kn-${st.shopId}-connect-${Date.now()}` });
           return reply.redirect(settingsUrl({ ig: "connected" }), 303);
         } catch (err) {
           req.log.warn({ err }, "instagram oauth failed");

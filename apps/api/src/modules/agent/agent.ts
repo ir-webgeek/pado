@@ -1,6 +1,6 @@
 import type { BetaContentBlockParam, BetaMessageParam, BetaToolResultBlockParam } from "@anthropic-ai/sdk/resources/beta/messages/messages";
 import { desc, eq } from "drizzle-orm";
-import { messages, type ShopSettings } from "@shopino/db";
+import { messages, RAG_SOURCES, type ShopSettings } from "@shopino/db";
 import { env } from "../../config";
 import { searchKnowledge } from "../knowledge/search";
 import { addUsage, agentModel, aiAvailable, anthropic, costOf, emptyUsage, type Usage } from "./llm";
@@ -26,6 +26,9 @@ export interface AgentResult {
   costToman: number;
   durationMs: number;
 }
+
+/** Knowledge sources the shop allows the assistant to use (empty when retrieval is off). */
+export const ragSourcesOf = (settings: ShopSettings) => (settings.rag.enabled ? RAG_SOURCES.filter((s) => settings.rag.sources[s]) : []);
 
 /** Stable instructions first (cacheable), shop-specific text after. */
 function systemPrompt(shop: AgentShop, channel: AgentToolContext["channel"]): string {
@@ -53,6 +56,7 @@ function systemPrompt(shop: AgentShop, channel: AgentToolContext["channel"]): st
     a.learnedStyle ? `\nHow this shop usually writes (learned from its past replies):\n${a.learnedStyle}` : "",
     a.rules ? `\nShop rules (follow strictly):\n${a.rules}` : "",
     a.knowledge ? `\nShop knowledge (policies, shipping, FAQ):\n${a.knowledge}` : "",
+    shop.settings.rag.enabled && shop.settings.rag.instructions ? `\nHow to use the shop knowledge:\n${shop.settings.rag.instructions}` : "",
   ]
     .filter((l) => l !== "")
     .join("\n");
@@ -84,10 +88,11 @@ async function history(ctx: AgentToolContext): Promise<BetaMessageParam[]> {
  * Retrieval-augmented turn: the latest customer message is sent together with the most relevant
  * knowledge snippets (and what page they are looking at), so the system prompt stays cacheable.
  */
-async function augmentLastTurn(ctx: AgentToolContext, msgs: BetaMessageParam[], pageContext?: string) {
+async function augmentLastTurn(shop: AgentShop, ctx: AgentToolContext, msgs: BetaMessageParam[], pageContext?: string) {
   const last = msgs.at(-1)!;
   const question = typeof last.content === "string" ? last.content : "";
-  const hits = await searchKnowledge(ctx.db, ctx.shopId, question, 3);
+  const rag = shop.settings.rag;
+  const hits = rag.enabled ? await searchKnowledge(ctx.db, ctx.shopId, question, rag.topK, ctx.ragSources) : [];
   const blocks: BetaContentBlockParam[] = [{ type: "text", text: question }];
   const extra = [
     pageContext ? `[Customer is currently viewing: ${pageContext}]` : "",
@@ -102,7 +107,8 @@ export async function runAgent(shop: AgentShop, ctx: AgentToolContext, pageConte
   const usage = emptyUsage();
   const msgs = await history(ctx);
   if (!msgs.length) return { reply: null, handoff: null, usage, costToman: 0, durationMs: 0 };
-  await augmentLastTurn(ctx, msgs, pageContext);
+  ctx.ragSources ??= ragSourcesOf(shop.settings);
+  await augmentLastTurn(shop, ctx, msgs, pageContext);
 
   const tools = toolsFor(shop.kind).map((t) => t.tool);
   const system = systemPrompt(shop, ctx.channel);

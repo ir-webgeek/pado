@@ -1,10 +1,12 @@
 "use client";
 
-import { BookOpen, Brain, LayoutTemplate, Plus, Search, Sparkles, Trash2, Wand2 } from "lucide-react";
+import { BookOpen, Brain, Database, LayoutTemplate, Plus, RefreshCw, Search, Sparkles, Trash2, Wand2 } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 import { Badge, Button, Card, Empty, ErrorNote, Field, Input, Modal, PageHeader, Spinner, Textarea, Toggle } from "@/components/ui";
 import { api, useApi } from "@/lib/api";
+import { dateTime, num } from "@/lib/format";
+import type { DictKey } from "@/lib/i18n";
 import { useI18n } from "@/lib/locale-client";
 import { useShop } from "@/lib/shop";
 
@@ -60,6 +62,7 @@ export default function AiPage() {
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_24rem]">
         <Knowledge />
         <div className="space-y-4">
+          <RagSettings />
           <Learn style={agent?.learnedStyle ?? ""} onSaved={reloadShop} save={(s) => patchAgent({ learnedStyle: s })} />
         </div>
       </div>
@@ -327,6 +330,104 @@ function LandingEditor({ landing, onSaved }: { landing: Landing | null; onSaved:
             }
           }}
         >
+          {t("a.save")}
+        </Button>
+      </div>
+    </Card>
+  );
+}
+
+const RAG_SOURCES = ["manual", "faq", "dm_history", "products", "comments"] as const;
+type RagSource = (typeof RAG_SOURCES)[number];
+interface Rag {
+  enabled: boolean;
+  topK: number;
+  sources: Record<RagSource, boolean>;
+  autoLearn: boolean;
+  instructions: string;
+  lastRun: { at: string; products: number; comments: number; dms: number; error?: string } | null;
+}
+
+/** Retrieval settings: which sources the assistant may use, how much, and automatic rebuilding. */
+function RagSettings() {
+  const { t, locale } = useI18n();
+  const { shop } = useShop();
+  const { data, mutate } = useApi<{ bySource: Record<string, number>; comments: number; rag: Rag }>(`/shops/${shop.id}/knowledge/stats`);
+  const [draft, setDraft] = useState<Rag | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [queued, setQueued] = useState(false);
+  const [error, setError] = useState<unknown>(null);
+  if (!data) return <Spinner />;
+  const rag = draft ?? data.rag;
+  const set = (patch: Partial<Rag>) => setDraft({ ...rag, ...patch });
+  const save = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const { lastRun: _l, ...body } = rag;
+      await api(`/shops/${shop.id}/settings`, { method: "PATCH", json: { rag: body } });
+      setDraft(null);
+      await mutate();
+    } catch (e) {
+      setError(e);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const rebuild = async () => {
+    setError(null);
+    try {
+      await api(`/shops/${shop.id}/knowledge/autosetup`, { method: "POST" });
+      setQueued(true);
+      setTimeout(() => void mutate(), 4000);
+    } catch (e) {
+      setError(e);
+    }
+  };
+  return (
+    <Card className="space-y-3">
+      <h3 className="flex items-center gap-2 font-semibold strong">
+        <Database className="size-4 text-[var(--accent)]" /> {t("rag.title")}
+      </h3>
+      <p className="text-xs muted">{t("rag.sub")}</p>
+      <Toggle checked={rag.enabled} onChange={(v) => set({ enabled: v })} label={t("rag.enabled")} />
+      <div className="space-y-1.5">
+        <span className="label">{t("rag.sources")}</span>
+        {RAG_SOURCES.map((src) => (
+          <label key={src} className="flex items-center justify-between gap-2 text-sm">
+            <span className="flex items-center gap-2">
+              <input type="checkbox" checked={rag.sources[src]} disabled={!rag.enabled} onChange={(e) => set({ sources: { ...rag.sources, [src]: e.target.checked } })} />
+              {t(`rag.src.${src}` as DictKey)}
+            </span>
+            <span className="num text-xs muted">{num(data.bySource[src] ?? 0, locale)}</span>
+          </label>
+        ))}
+      </div>
+      <Field label={t("rag.topK")}>
+        <Input type="number" min={1} max={8} value={rag.topK} onChange={(e) => set({ topK: Math.min(8, Math.max(1, Number(e.target.value) || 1)) })} />
+      </Field>
+      <Field label={t("rag.instructions")}>
+        <Textarea rows={3} maxLength={2000} placeholder={t("rag.instructionsPh")} value={rag.instructions} onChange={(e) => set({ instructions: e.target.value })} />
+      </Field>
+      <Toggle checked={rag.autoLearn} onChange={(v) => set({ autoLearn: v })} label={t("rag.autoLearn")} />
+      <div className="rounded-xl bg-[var(--surface-sunken)] px-3 py-2 text-xs muted">
+        {data.rag.lastRun ? (
+          <>
+            {t("rag.lastRun")} {dateTime(data.rag.lastRun.at, locale)}: {t("rag.src.products")} {num(data.rag.lastRun.products, locale)} · {t("rag.src.comments")}{" "}
+            {num(data.rag.lastRun.comments, locale)} · {t("rag.src.dm_history")} {num(data.rag.lastRun.dms, locale)}
+            {data.rag.lastRun.error && <span className="mt-1 block text-warning" dir="ltr">{data.rag.lastRun.error}</span>}
+          </>
+        ) : (
+          t("rag.never")
+        )}
+        <span className="mt-1 block">{t("rag.commentsStored")}: {num(data.comments, locale)}</span>
+      </div>
+      <ErrorNote error={error} />
+      <div className="flex flex-wrap justify-end gap-2">
+        <Button onClick={rebuild} disabled={queued}>
+          <RefreshCw className="size-4" /> {queued ? t("rag.queued") : t("rag.rebuild")}
+        </Button>
+        <Button variant="primary" loading={busy} disabled={!draft} onClick={save}>
           {t("a.save")}
         </Button>
       </div>

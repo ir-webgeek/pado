@@ -122,7 +122,22 @@ export interface ShopSettings {
   invoice: { address: string; phone: string; postalCode: string; footer: string };
   /** optional USD-linked pricing: variant price = priceUsd x rate x (1 + markup), rounded */
   pricing: { usdEnabled: boolean; usdRate: number; markupPercent: number; roundTo: number; rateUpdatedAt: string | null; autoFetch: boolean };
+  /** retrieval (RAG) for the assistant: which knowledge sources it may use and how it keeps them fresh */
+  rag: {
+    enabled: boolean;
+    /** snippets attached to each customer message */
+    topK: number;
+    sources: Record<RagSource, boolean>;
+    /** rebuild products/comments/chat knowledge automatically every night */
+    autoLearn: boolean;
+    /** extra instructions for how to use retrieved knowledge */
+    instructions: string;
+    lastRun: { at: string; products: number; comments: number; dms: number; error?: string } | null;
+  };
 }
+
+export const RAG_SOURCES = ["manual", "faq", "dm_history", "products", "comments"] as const;
+export type RagSource = (typeof RAG_SOURCES)[number];
 
 export const DEFAULT_SHOP_SETTINGS: ShopSettings = {
   loyalty: { enabled: true, tomanPerPoint: 100_000, pointValue: 1_000, expiryDays: 365 },
@@ -151,6 +166,14 @@ export const DEFAULT_SHOP_SETTINGS: ShopSettings = {
   invoice: { address: "", phone: "", postalCode: "", footer: "" },
   alerts: { phone: "", onHandoff: true, onOrder: true, onBooking: false },
   pricing: { usdEnabled: false, usdRate: 0, markupPercent: 0, roundTo: 1000, rateUpdatedAt: null, autoFetch: false },
+  rag: {
+    enabled: true,
+    topK: 3,
+    sources: { manual: true, faq: true, dm_history: true, products: true, comments: true },
+    autoLearn: true,
+    instructions: "",
+    lastRun: null,
+  },
 };
 
 export type PartialShopSettings = { [K in keyof ShopSettings]?: Partial<ShopSettings[K]> };
@@ -168,6 +191,7 @@ export function resolveShopSettings(stored: PartialShopSettings | null | undefin
     invoice: { ...DEFAULT_SHOP_SETTINGS.invoice, ...s.invoice },
     alerts: { ...DEFAULT_SHOP_SETTINGS.alerts, ...s.alerts },
     pricing: { ...DEFAULT_SHOP_SETTINGS.pricing, ...s.pricing },
+    rag: { ...DEFAULT_SHOP_SETTINGS.rag, ...s.rag, sources: { ...DEFAULT_SHOP_SETTINGS.rag.sources, ...s.rag?.sources } },
   };
 }
 
@@ -968,7 +992,9 @@ export const knowledgeEntries = pgTable(
   {
     id: id(),
     shopId: shopRef(),
-    source: text().notNull().default("manual"), // manual | faq | dm_history | document
+    source: text().notNull().default("manual"), // manual | faq | dm_history | products | comments
+    /** for synced sources: the product id / comment thread it came from, so a resync replaces it */
+    ref: text(),
     title: text().notNull(),
     content: text().notNull(),
     active: boolean().notNull().default(true),
@@ -1064,3 +1090,23 @@ export const platformSettings = pgTable("platform_settings", {
   updatedBy: uuid(),
   updatedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
 });
+
+/** Instagram comments (webhook + history fetch): the assistant learns recurring questions from them. */
+export const igComments = pgTable(
+  "ig_comments",
+  {
+    id: id(),
+    shopId: shopRef(),
+    commentId: text().notNull(),
+    mediaId: text(),
+    parentId: text(),
+    fromId: text(),
+    username: text(),
+    text: text().notNull(),
+    /** written by the shop's own account (a reply to a customer) */
+    byShop: boolean().notNull().default(false),
+    postedAt: timestamp({ withTimezone: true }),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex().on(t.shopId, t.commentId), index().on(t.shopId, t.mediaId)],
+);

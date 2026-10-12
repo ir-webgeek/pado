@@ -6,6 +6,7 @@ import { TtlCache } from "../../lib/cache";
 import type { Ctx } from "../../lib/context";
 import { verifySignature } from "./client";
 import { cfg } from "../../lib/platform";
+import { storeComment } from "../knowledge/sync";
 
 interface IgWebhook {
   object?: string;
@@ -25,7 +26,7 @@ interface IgWebhook {
         reply_to?: { mid?: string; story?: { id: string; url?: string } };
       };
     }[];
-    changes?: { field: string; value: { id: string; text?: string; from?: { id: string; username?: string }; media?: { id: string } } }[];
+    changes?: { field: string; value: { id: string; text?: string; from?: { id: string; username?: string }; media?: { id: string }; parent_id?: string } }[];
   }[];
 }
 
@@ -78,7 +79,19 @@ export const instagramWebhook =
           );
         }
         for (const c of entry.changes ?? []) {
-          if (c.field !== "comments" || !c.value.from || c.value.from.id === entry.id) continue;
+          if (c.field !== "comments" || !c.value.from) continue;
+          // every comment (the shop's own replies too) feeds the assistant's knowledge
+          await storeComment(ctx.db, shopId, {
+            commentId: c.value.id,
+            text: c.value.text ?? "",
+            mediaId: c.value.media?.id,
+            parentId: c.value.parent_id,
+            fromId: c.value.from.id,
+            username: c.value.from.username,
+            byShop: c.value.from.id === entry.id,
+            postedAt: new Date(),
+          });
+          if (c.value.from.id === entry.id) continue;
           await ctx.queues.add(
             "ig.comment",
             { shopId, commentId: c.value.id, text: c.value.text ?? "", fromId: c.value.from.id, username: c.value.from.username, mediaId: c.value.media?.id },

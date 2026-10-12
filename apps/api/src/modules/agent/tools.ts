@@ -21,6 +21,8 @@ export interface AgentToolContext {
   channel: "instagram" | "telegram" | "web" | "agent";
   /** set when a tool decides a human must take over */
   handoff?: string;
+  /** retrieval settings: allowed knowledge sources (undefined = all) */
+  ragSources?: readonly string[];
   /** every tool call of this run, for the admin log */
   toolLog: { name: string; ok: boolean }[];
 }
@@ -273,7 +275,7 @@ const knowledgeTool = def({
   },
   input: z.object({ query: z.string().min(1).max(300) }),
   async run(ctx, { query }) {
-    const rows = await searchKnowledge(ctx.db, ctx.shopId, query, 5);
+    const rows = await searchKnowledge(ctx.db, ctx.shopId, query, 5, ctx.ragSources);
     return { results: rows.map((r) => ({ title: r.title, content: r.content })) };
   },
 });

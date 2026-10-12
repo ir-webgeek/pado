@@ -9,7 +9,8 @@ import type { PaymentProvider } from "./types";
  * - POST CheckTransactionResult (IsSuccess), then VerifyPayment (IsSuccess) to keep the money
  * Every request body is signed with the merchant's RSA private key (SHA1, base64) in a `Sign` header.
  * Amounts are sent in Rial (we store Toman), as with the other Shaparak gateways here.
- * The v1 API has no split (تسهیم) fields, so the platform fee stays recorded on the payment for settlement.
+ * Split (تسهیم شاپرکی, must be enabled on the terminal): `MultiPaymentData` = base64 of an XML list of
+ * <item><iban/><type/><value/></item>, type 0 = fixed amount (Rial), exactly as the official PHP SDK builds it.
  */
 const ACTION_PAYMENT = 1003;
 const base = () => (cfg("PASARGAD_BASE_URL") ?? "https://pep.shaparak.ir").replace(/\/+$/, "");
@@ -25,6 +26,13 @@ export function xmlKeyToPrivateKey(xml: string) {
     key: { kty: "RSA", n: tag("Modulus"), e: tag("Exponent"), d: tag("D"), p: tag("P"), q: tag("Q"), dp: tag("DP"), dq: tag("DQ"), qi: tag("InverseQ") },
     format: "jwk",
   });
+}
+
+/** MultiPaymentData payload (official PHP SDK: PaymentItem + generatePayment). Values in Rial. */
+export function multiPaymentData(splits: { iban: string; amount: number }[]) {
+  const esc = (v: string) => v.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const items = splits.map((x) => `<item>\n <iban>${esc(x.iban)}</iban>\n <type>0</type>\n <value>${x.amount * 10}</value>\n</item>\n`).join("");
+  return Buffer.from(`<?xml version="1.0" encoding="UTF-8"?>\n${items}`, "utf8").toString("base64");
 }
 
 export function signBody(body: string, xmlKey: string) {
@@ -66,7 +74,7 @@ async function call<T>(path: string, params: Record<string, unknown>, key: strin
 
 export const pasargadProvider: PaymentProvider = {
   name: "pasargad",
-  supportsSplit: false,
+  supportsSplit: true,
   async request(req) {
     const c = creds();
     const invoiceNumber = `${Date.now()}${randomInt(100, 1000)}`;
@@ -82,6 +90,8 @@ export const pasargadProvider: PaymentProvider = {
         terminalCode: c.terminalCode,
         redirectAddress: req.callbackUrl,
         timeStamp: tehran(new Date(), "-"),
+        ...(req.mobile ? { mobile: req.mobile } : {}),
+        ...(req.splits?.length ? { MultiPaymentData: multiPaymentData(req.splits) } : {}),
       },
       c.key,
     );

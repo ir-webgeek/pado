@@ -1,7 +1,7 @@
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { z } from "zod";
-import { knowledgeEntries } from "@shopino/db";
+import { igComments, knowledgeEntries } from "@shopino/db";
 import { knowledgeInputSchema } from "@shopino/shared";
 import type { Ctx } from "../../lib/context";
 import { invalidateShopCache, requireFeature, requireShop } from "../../lib/auth";
@@ -9,6 +9,7 @@ import { notFound } from "../../lib/errors";
 import { assertAiReady } from "../agent/llm";
 import { learnFromDms } from "./learn";
 import { searchKnowledge } from "./search";
+import { ragSourcesOf } from "../agent/agent";
 
 const params = z.object({ shopId: z.string().uuid() });
 const withId = params.extend({ id: z.string().uuid() });
@@ -47,8 +48,23 @@ export const knowledgeRoutes =
       return { ok: true };
     });
     app.get("/:shopId/knowledge/search", { preHandler: requireShop(ctx), schema: { params, querystring: z.object({ q: z.string().min(1).max(300) }) } }, async (req) =>
-      searchKnowledge(ctx.db, req.shop.id, req.query.q, 6),
+      searchKnowledge(ctx.db, req.shop.id, req.query.q, 6, ragSourcesOf(req.shop.settings)),
     );
+    // RAG overview: entries per source and the last auto-setup run
+    app.get("/:shopId/knowledge/stats", { preHandler: requireShop(ctx), schema: { params } }, async (req) => {
+      const rows = await ctx.db
+        .select({ source: knowledgeEntries.source, n: sql<number>`count(*)::int` })
+        .from(knowledgeEntries)
+        .where(eq(knowledgeEntries.shopId, req.shop.id))
+        .groupBy(knowledgeEntries.source);
+      const [c] = await ctx.db.select({ n: sql<number>`count(*)::int` }).from(igComments).where(eq(igComments.shopId, req.shop.id));
+      return { bySource: Object.fromEntries(rows.map((r) => [r.source, r.n])), comments: c?.n ?? 0, rag: req.shop.settings.rag };
+    });
+    // rebuild products / comments / chat knowledge in the background
+    app.post("/:shopId/knowledge/autosetup", { preHandler: requireShop(ctx, "admin"), schema: { params }, config: { rateLimit: { max: 3, timeWindow: "10 minutes" } } }, async (req) => {
+      await ctx.queues.add("knowledge.autosetup", { shopId: req.shop.id }, { jobId: `kn-${req.shop.id}-${Date.now()}` });
+      return { queued: true };
+    });
     app.post("/:shopId/knowledge/learn", { preHandler: requireShop(ctx, "admin"), schema: { params }, config: { rateLimit: { max: 3, timeWindow: "10 minutes" } } }, async (req) => {
       requireFeature(req.shop, "knowledge");
       await assertAiReady(ctx.db, req.shop.id);

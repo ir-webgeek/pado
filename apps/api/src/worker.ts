@@ -24,6 +24,7 @@ import { refreshUsdRateFromSource } from "./modules/pricing/service";
 import { analyzeMedia } from "./modules/instagram/importer";
 import { refreshInstagramTokens } from "./modules/instagram/token-refresh";
 import { runWooImport } from "./modules/woocommerce/import";
+import { autoSetupKnowledge } from "./modules/knowledge/sync";
 
 const { db, client } = createDb(env.DATABASE_URL, { max: 10 });
 await initPlatformSettings(db);
@@ -75,6 +76,14 @@ const handlers: Handlers = {
   "instagram.analyze": ({ shopId, mediaRowIds }) => analyzeMedia(db, shopId, mediaRowIds),
   "instagram.refresh-tokens": () => refreshInstagramTokens(db),
   "woocommerce.import": ({ importId }) => runWooImport(db, importId),
+  "knowledge.autosetup": ({ shopId, fetchComments }) => autoSetupKnowledge(db, shopId, { fetchComments }),
+  "knowledge.nightly": async () => {
+    // shops that keep auto-learn on get their synced knowledge rebuilt, spread over the queue
+    for (const s of await db.select({ id: shops.id, settings: shops.settings }).from(shops)) {
+      const rag = resolveShopSettings(s.settings).rag;
+      if (rag.enabled && rag.autoLearn) await queues.add("knowledge.autosetup", { shopId: s.id }, { jobId: `kn-${s.id}-${new Date().toISOString().slice(0, 10)}` });
+    }
+  },
 };
 
 const process = (job: Job) => {
@@ -101,6 +110,7 @@ await queues.queues.scheduled.upsertJobScheduler(
 );
 
 // long-lived Instagram tokens expire after 60 days unless refreshed
+await queues.queues.scheduled.upsertJobScheduler("knowledge-nightly", { pattern: "45 2 * * *", tz: "Asia/Tehran" }, { name: "knowledge.nightly", data: {} });
 await queues.queues.scheduled.upsertJobScheduler("ig-token-refresh", { pattern: "15 4 * * *", tz: "Asia/Tehran" }, { name: "instagram.refresh-tokens", data: {} });
 
 if (env.USD_RATE_URL) {
