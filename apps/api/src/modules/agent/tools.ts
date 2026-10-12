@@ -1,5 +1,5 @@
 import type { BetaTool } from "@anthropic-ai/sdk/resources/beta/messages/messages";
-import { and, eq, ilike, or, sql } from "drizzle-orm";
+import { and, eq, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { orders, productVariants, products, services, staff, staffServices, type Database } from "@shopino/db";
 import { addDaysIso, formatJalali, zonedIsoDate } from "@shopino/shared";
@@ -10,6 +10,7 @@ import { bookAppointment, getSlots } from "../appointments/service";
 import { variantLabel } from "../catalog/service";
 import { createOrder } from "../orders/service";
 import { searchKnowledge } from "../knowledge/search";
+import { faContains, faNormalize } from "../../lib/fa-search";
 
 export interface AgentToolContext {
   db: Database;
@@ -53,7 +54,7 @@ const searchProducts = def({
   },
   input: z.object({ query: z.string().max(100), limit: z.number().int().min(1).max(10).optional() }),
   async run(ctx, { query, limit }) {
-    const words = query.split(/\s+/).filter((w) => w.length > 1).slice(0, 5);
+    const words = faNormalize(query).split(/\s+/).filter((w) => w.length > 1).slice(0, 5);
     const rows = await ctx.db
       .select({ id: products.id, title: products.title, description: products.description })
       .from(products)
@@ -61,7 +62,7 @@ const searchProducts = def({
         and(
           eq(products.shopId, ctx.shopId),
           eq(products.status, "active"),
-          words.length ? or(...words.map((w) => or(ilike(products.title, `%${w}%`), ilike(products.description, `%${w}%`)))) : undefined,
+          words.length ? or(...words.map((w) => or(faContains(products.title, w), faContains(products.description, w)))) : undefined,
         ),
       )
       .orderBy(words.length ? sql`similarity(${products.title}, ${query}) desc` : sql`${products.createdAt} desc`)

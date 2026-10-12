@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 import { platformSettings, type Database } from "@shopino/db";
 import { applyPlanOverrides, type PlanId, type PlanOverride } from "@shopino/shared";
 import { env } from "../config";
+import { AI_MODEL_IDS } from "../modules/agent/models";
 
 /**
  * Platform configuration the super admin sets in the panel. Every key falls back to the environment
@@ -22,7 +23,21 @@ export interface SettingDef {
 
 export const SETTINGS: SettingDef[] = [
   { key: "ANTHROPIC_API_KEY", group: "ai", label: { fa: "کلید API هوش مصنوعی (Anthropic)", en: "AI API key (Anthropic)" }, secret: true },
-  { key: "AGENT_MODEL", group: "ai", label: { fa: "مدل", en: "Model" } },
+  {
+    key: "AGENT_MODEL",
+    group: "ai",
+    label: { fa: "مدل", en: "Model" },
+    options: AI_MODEL_IDS,
+    hint: { fa: "Haiku 5.5 ارزان‌ترین و سریع‌ترینه و برای پاسخ دایرکت کافیه؛ Sonnet و Opus دقیق‌ترن و گران‌تر.", en: "Haiku 5.5 is the cheapest and fastest, enough for DM replies; Sonnet and Opus are more capable and cost more." },
+  },
+  {
+    key: "AI_TOMAN_PER_USD",
+    group: "ai",
+    label: { fa: "نرخ دلار برای هزینه هوش مصنوعی (تومان)", en: "USD rate for AI cost (Toman)" },
+    kind: "number",
+    hint: { fa: "با این نرخ، هزینه واقعی هر مدل از کیف پول فروشگاه کم می‌شه. خالی: قیمت ثابت قبلی.", en: "With a rate set, each model's real token price is charged to the shop wallet. Empty: the old fixed price." },
+  },
+  { key: "AI_MARKUP_PERCENT", group: "ai", label: { fa: "سود روی هزینه هوش مصنوعی (درصد)", en: "Markup on AI cost (%)" }, kind: "number" },
   { key: "META_APP_SECRET", group: "meta", label: { fa: "App Secret متا", en: "Meta app secret" }, secret: true },
   { key: "META_VERIFY_TOKEN", group: "meta", label: { fa: "توکن تایید وب‌هوک", en: "Webhook verify token" } },
   { key: "META_GRAPH_VERSION", group: "meta", label: { fa: "نسخه Graph API", en: "Graph API version" } },

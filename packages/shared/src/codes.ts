@@ -16,6 +16,11 @@ export const bookingCode = () => `BK-${randomCode(8)}`;
 /** Goods receipt code, e.g. RCV-7K3M9Q */
 export const receiptCode = () => `RCV-${randomCode(6)}`;
 
+/** Persian and Arabic-Indic digits to Latin, so carriers, gateways and SMS get plain numbers. */
+export function latinDigits(s: string): string {
+  return s.replace(/[۰-۹]/g, (d) => String("۰۱۲۳۴۵۶۷۸۹".indexOf(d))).replace(/[٠-٩]/g, (d) => String("٠١٢٣٤٥٦٧٨٩".indexOf(d)));
+}
+
 export function normalizeIranPhone(input: string): string | null {
   const digits = input
     .replace(/[۰-۹]/g, (d) => String("۰۱۲۳۴۵۶۷۸۹".indexOf(d)))

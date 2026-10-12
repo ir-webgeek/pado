@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addDaysIso, isoToJalali, jalaliMonthLength, jalaliToIso, tzOffsetMinutes, weekdayOfIso, zonedIsoDate, zonedToUtc } from "./time";
+import { addDaysIso, formatJalali, isoToJalali, jalaliMonthLength, jalaliToIso, tzOffsetMinutes, weekdayOfIso, zonedIsoDate, zonedToUtc } from "./time";
 import { normalizeIranPhone } from "./codes";
 import { weightedCost } from "./money";
 
@@ -79,5 +79,19 @@ describe("sheba", () => {
     expect(normalizeSheba(valid.slice(2))).toBe(valid);
     expect(isValidSheba(valid.slice(0, -1) + "2")).toBe(false);
     expect(isValidSheba("IR12")).toBe(false);
+  });
+});
+
+describe("formatJalali", () => {
+  it("defaults to a medium date", () => {
+    expect(formatJalali("2026-10-13T12:00:00Z")).toMatch(/مهر/);
+  });
+  it("accepts component options without dateStyle (agent slot lists, notifications)", () => {
+    expect(() => formatJalali("2026-10-13T12:00:00Z", { weekday: "long", day: "numeric", month: "long" })).not.toThrow();
+    expect(formatJalali("2026-10-13T12:00:00Z", { weekday: "long", day: "numeric", month: "long" })).toMatch(/سه‌شنبه/);
+    expect(() => formatJalali(new Date(), { dateStyle: undefined, weekday: "long", hour: "2-digit", minute: "2-digit" })).not.toThrow();
+  });
+  it("keeps an explicit style", () => {
+    expect(() => formatJalali(new Date(), { dateStyle: "full" })).not.toThrow();
   });
 });

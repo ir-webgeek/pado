@@ -10,6 +10,7 @@ import { notFound } from "../../lib/errors";
 import { customerWalletMove } from "../wallet/service";
 import { changePoints, upsertCustomer } from "./service";
 import { vipProgress } from "./segments";
+import { faContains } from "../../lib/fa-search";
 
 const params = z.object({ shopId: z.string().uuid() });
 const withId = params.extend({ id: z.string().uuid() });
@@ -37,7 +38,7 @@ export const customerRoutes =
         const where = and(
           eq(customers.shopId, req.shop.id),
           segment ? eq(customers.segment, segment) : undefined,
-          q ? or(ilike(customers.name, `%${q}%`), ilike(customers.phone, `%${q}%`), ilike(customers.instagramUsername, `%${q}%`)) : undefined,
+          q ? or(faContains(customers.name, q), faContains(customers.phone, q.replace(/^0/, "")), ilike(customers.instagramUsername, `%${q.replace(/^@/, "")}%`)) : undefined,
         );
         const order =
           sort === "spent"

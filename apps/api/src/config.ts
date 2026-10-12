@@ -30,7 +30,7 @@ const envSchema = z.object({
   USD_RATE_MULTIPLIER: z.coerce.number().default(1),
 
   ANTHROPIC_API_KEY: z.string().optional(),
-  AGENT_MODEL: z.string().default("claude-opus-5"),
+  AGENT_MODEL: z.string().default("claude-haiku-5-5"),
   AGENT_PRICE_IN_PER_MTOK: z.coerce.number().default(500_000),
   AGENT_PRICE_OUT_PER_MTOK: z.coerce.number().default(2_500_000),
   AGENT_MIN_BALANCE: z.coerce.number().default(2_000),

@@ -5,6 +5,7 @@ import { env } from "../../config";
 import { searchKnowledge } from "../knowledge/search";
 import { buildSystemPrompt, formatKnowledge, retrievalQuery } from "./persona";
 import { addUsage, agentModel, aiAvailable, anthropic, costOf, emptyUsage, type Usage } from "./llm";
+import { fallbackParams } from "./models";
 import type { AgentToolContext } from "./tools";
 import { runTool, toolsFor } from "./tools";
 
@@ -86,18 +87,19 @@ export async function runAgent(shop: AgentShop, ctx: AgentToolContext, pageConte
   const system = systemPrompt(shop, ctx.channel);
   let reply: string | null = null;
 
+  const model = agentModel();
   for (let turn = 0; turn < MAX_TURNS; turn++) {
     const res = await anthropic().beta.messages.create({
-      model: agentModel(),
+      model,
       max_tokens: 4000,
       system,
       tools,
       messages: msgs,
       cache_control: { type: "ephemeral" },
       thinking: { type: "adaptive" },
-      output_config: { effort: "medium" },
-      betas: ["server-side-fallback-2026-07-01"],
-      fallbacks: "default",
+      // chat assistants keep to the shop's rules better at high effort; Haiku stays cheap there
+      output_config: { effort: model === "claude-haiku-5-5" ? "high" : "medium" },
+      ...fallbackParams(model),
     });
     addUsage(usage, res.usage);
 
@@ -131,5 +133,5 @@ export async function runAgent(shop: AgentShop, ctx: AgentToolContext, pageConte
     reply = null;
   }
 
-  return { reply, handoff: ctx.handoff ?? null, usage, costToman: costOf(usage), durationMs: Date.now() - started };
+  return { reply, handoff: ctx.handoff ?? null, usage, costToman: costOf(usage, model), durationMs: Date.now() - started };
 }

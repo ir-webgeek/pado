@@ -1,4 +1,4 @@
-import { isValidSheba, normalizeSheba } from "./codes";
+import { isValidSheba, latinDigits, normalizeSheba } from "./codes";
 import { z } from "zod";
 import { APPOINTMENT_STATUSES, ORDER_STATUSES, PAYMENT_METHODS, SALES_CHANNELS, SHOP_KINDS } from "./enums";
 
@@ -165,13 +165,21 @@ export const expenseInputSchema = z.object({
 });
 
 // ---------- orders ----------
+/** Digits typed on a Persian keyboard are stored as Latin digits (carrier APIs, labels and SMS need them). */
+const digitsOnly = (s: string) => latinDigits(s).replace(/[\s\-()]/g, "");
 export const addressSchema = z.object({
-  fullName: z.string().min(2).max(80),
-  phone: phoneSchema,
-  province: z.string().max(60),
-  city: z.string().max(60),
-  line: z.string().min(5).max(300),
-  postalCode: z.string().max(12).optional(),
+  fullName: z.string().trim().min(2).max(80),
+  phone: phoneSchema.transform(digitsOnly).refine((s) => /^\+?\d{8,14}$/.test(s), "invalid phone number"),
+  province: z.string().trim().max(60),
+  city: z.string().trim().max(60),
+  line: z.string().trim().min(5).max(300),
+  postalCode: z
+    .string()
+    .max(14)
+    .transform(digitsOnly)
+    .refine((s) => s === "" || /^\d{10}$/.test(s), "postal code must be 10 digits")
+    .transform((s) => s || undefined)
+    .optional(),
 });
 
 export const orderItemInputSchema = z.object({ variantId: z.string().uuid(), quantity: z.number().int().min(1).max(999) });

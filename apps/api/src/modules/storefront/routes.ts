@@ -34,6 +34,7 @@ import { aiAvailable } from "../agent/llm";
 import { verifyConversationToken } from "../automations/execute";
 import { webAssistantOn } from "../agent/web-assistant";
 import { handleInbound } from "../inbox/pipeline";
+import { faContains } from "../../lib/fa-search";
 
 type ShopRow = typeof shops.$inferSelect;
 const shopBySlug = new TtlCache<ShopRow | null>(15_000);
@@ -184,7 +185,7 @@ export const storefrontRoutes =
               eq(products.shopId, shop.id),
               eq(products.status, "active"),
               cat ? eq(products.categoryId, cat.id) : undefined,
-              q ? sql`${products.title} ILIKE ${"%" + q + "%"}` : undefined,
+              q ? faContains(products.title, q) : undefined,
             ),
           )
           .groupBy(products.id)

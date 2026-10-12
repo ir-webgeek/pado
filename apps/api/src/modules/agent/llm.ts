@@ -6,7 +6,8 @@ import type { Database } from "@shopino/db";
 import { env } from "../../config";
 import { AppError, badRequest } from "../../lib/errors";
 import { walletBalance, walletMove } from "../wallet/service";
-import { cfg } from "../../lib/platform";
+import { cfg, cfgNumber } from "../../lib/platform";
+import { AI_MODELS, fallbackParams } from "./models";
 
 let client: { key: string; c: Anthropic } | null = null;
 /** Client for the current key; rebuilt when the super admin changes it in the panel. */
@@ -33,9 +34,18 @@ export function addUsage(u: Usage, r: { input_tokens: number; output_tokens: num
   u.cacheWrite += r.cache_creation_input_tokens ?? 0;
 }
 
-/** Toman charged to the shop wallet for a model call (configurable markup over token prices). */
-export function costOf(u: Usage) {
+/**
+ * Toman charged to the shop wallet for a model call. With a USD rate set in super admin, the model's
+ * own token prices plus the markup; otherwise the fixed per-MTok prices from the environment.
+ */
+export function costOf(u: Usage, model = agentModel()) {
   const inputEquivalent = u.input + u.cacheWrite * 1.25 + u.cacheRead * 0.1;
+  const rate = cfgNumber("AI_TOMAN_PER_USD", 0);
+  const info = AI_MODELS[model];
+  if (rate > 0 && info) {
+    const usd = (inputEquivalent / 1e6) * info.inUsd + (u.output / 1e6) * info.outUsd;
+    return Math.ceil(usd * rate * (1 + cfgNumber("AI_MARKUP_PERCENT", 0) / 100));
+  }
   return Math.ceil((inputEquivalent / 1e6) * env.AGENT_PRICE_IN_PER_MTOK + (u.output / 1e6) * env.AGENT_PRICE_OUT_PER_MTOK);
 }
 
@@ -64,15 +74,15 @@ export async function structured<S extends z.ZodType>(opts: {
   maxTokens?: number;
   effort?: "low" | "medium" | "high";
 }): Promise<{ data: z.infer<S>; usage: Usage }> {
+  const model = agentModel();
   const res = await anthropic().beta.messages.parse({
-    model: agentModel(),
+    model,
     max_tokens: opts.maxTokens ?? 8000,
     system: opts.system,
     messages: [{ role: "user", content: opts.content }],
     thinking: { type: "adaptive" },
     output_config: { effort: opts.effort ?? "medium", format: betaZodOutputFormat(opts.schema) },
-    betas: ["server-side-fallback-2026-07-01"],
-    fallbacks: "default",
+    ...fallbackParams(model),
   });
   const usage = emptyUsage();
   addUsage(usage, res.usage);

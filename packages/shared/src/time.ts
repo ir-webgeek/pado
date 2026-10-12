@@ -141,9 +141,16 @@ export function jalaliMonthLength(jy: number, jm: number): number {
   return daysBetweenIso(jalaliToIso(jy, 12, 1), jalaliToIso(jy + 1, 1, 1));
 }
 
-/** Persian (Jalali) calendar display using the platform's ICU data. */
+const COMPONENT_OPTIONS = ["weekday", "era", "year", "month", "day", "hour", "minute", "second", "timeZoneName"] as const;
+
+/**
+ * Persian (Jalali) calendar display using the platform's ICU data. `dateStyle: "medium"` is the default
+ * only when no date/time components are asked for: Intl rejects the two together.
+ */
 export function formatJalali(date: Date | string, opts: Intl.DateTimeFormatOptions = {}, timeZone = "Asia/Tehran"): string {
-  return new Intl.DateTimeFormat("fa-IR-u-ca-persian", { timeZone, dateStyle: "medium", ...opts }).format(
-    typeof date === "string" ? new Date(date) : date,
-  );
+  const components = COMPONENT_OPTIONS.some((k) => opts[k] !== undefined);
+  const base: Intl.DateTimeFormatOptions = components || opts.timeStyle ? {} : { dateStyle: "medium" };
+  const merged: Intl.DateTimeFormatOptions = { timeZone, ...base, ...opts };
+  if (components) delete merged.dateStyle;
+  return new Intl.DateTimeFormat("fa-IR-u-ca-persian", merged).format(typeof date === "string" ? new Date(date) : date);
 }

@@ -8,6 +8,7 @@ import { requireShop } from "../../lib/auth";
 import { createOrder, getOrderFull, transitionOrder } from "./service";
 import { reviewReceipt } from "../payments/service";
 import { env } from "../../config";
+import { faContains } from "../../lib/fa-search";
 
 const params = z.object({ shopId: z.string().uuid() });
 const withId = params.extend({ id: z.string().uuid() });
@@ -34,7 +35,7 @@ export const orderRoutes =
         const where = and(
           eq(orders.shopId, req.shop.id),
           status ? eq(orders.status, status) : undefined,
-          q ? or(ilike(orders.code, `%${q}%`), ilike(customers.name, `%${q}%`), ilike(customers.phone, `%${q}%`)) : undefined,
+          q ? or(ilike(orders.code, `%${q}%`), faContains(customers.name, q), faContains(customers.phone, q.replace(/^0/, ""))) : undefined,
         );
         const [items, counts] = await Promise.all([
           ctx.db

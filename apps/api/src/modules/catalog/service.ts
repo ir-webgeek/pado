@@ -5,6 +5,7 @@ import { PLANS, type ProductInput } from "@shopino/shared";
 import type { ShopCtx } from "../../lib/auth";
 import { badRequest, notFound, paymentRequired } from "../../lib/errors";
 import { lockStock } from "../inventory/pools";
+import { faContains } from "../../lib/fa-search";
 
 export function slugify(input: string) {
   const s = input
@@ -21,7 +22,7 @@ export async function listProducts(db: DbOrTx, shopId: string, opts: { q?: strin
   const where = [eq(products.shopId, shopId)];
   if (opts.status) where.push(eq(products.status, opts.status as "active"));
   if (opts.categoryId) where.push(eq(products.categoryId, opts.categoryId));
-  if (opts.q) where.push(sql`${products.title} ILIKE ${"%" + opts.q + "%"}`);
+  if (opts.q) where.push(faContains(products.title, opts.q));
   const rows = await db.query.products.findMany({
     where: and(...where),
     orderBy: (p, { desc }) => [desc(p.createdAt)],
