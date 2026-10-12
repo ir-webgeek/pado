@@ -1,9 +1,11 @@
 import { env } from "../../config";
+import { cfg } from "../../lib/platform";
 
 /** Telegram Bot API sendMessage. The shop links its chat by messaging the bot and saving the chat id in settings. */
 export async function sendTelegram(chatId: string, text: string, button?: { text: string; url: string }) {
-  if (!env.TELEGRAM_BOT_TOKEN) return { ok: false, skipped: true };
-  const res = await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
+  const token = cfg("TELEGRAM_BOT_TOKEN");
+  if (!token) return { ok: false, skipped: true };
+  const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({

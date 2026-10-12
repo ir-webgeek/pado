@@ -1052,3 +1052,15 @@ export const campaigns = pgTable(
   },
   (t) => [index().on(t.shopId, t.createdAt)],
 );
+
+/**
+ * Platform-wide configuration the super admin edits in the panel (API keys, gateway, carriers).
+ * Overrides the matching environment variable; secret values are stored AES-GCM encrypted.
+ */
+export const platformSettings = pgTable("platform_settings", {
+  key: text().primaryKey(),
+  value: text().notNull(),
+  secret: boolean().notNull().default(false),
+  updatedBy: uuid(),
+  updatedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+});

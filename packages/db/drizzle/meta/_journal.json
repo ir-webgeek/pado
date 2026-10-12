@@ -78,6 +78,13 @@
       "when": 1790973923837,
       "tag": "0010_woocommerce",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1791814280234,
+      "tag": "0011_platform_settings",
+      "breakpoints": true
     }
   ]
 }

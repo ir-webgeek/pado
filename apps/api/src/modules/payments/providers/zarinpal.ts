@@ -1,5 +1,6 @@
 import { env } from "../../../config";
 import type { PaymentProvider } from "./types";
+import { cfg } from "../../../lib/platform";
 
 /**
  * Zarinpal REST v4 adapter.
@@ -28,9 +29,9 @@ export const zarinpalProvider: PaymentProvider = {
   name: "zarinpal",
   supportsSplit: false,
   async request(req) {
-    if (!env.ZARINPAL_MERCHANT_ID) throw new Error("ZARINPAL_MERCHANT_ID is not set");
+    if (!cfg("ZARINPAL_MERCHANT_ID")) throw new Error("ZARINPAL_MERCHANT_ID is not set");
     const r = await post<ZpResponse<{ code: number; authority: string }>>("/pg/v4/payment/request.json", {
-      merchant_id: env.ZARINPAL_MERCHANT_ID,
+      merchant_id: cfg("ZARINPAL_MERCHANT_ID"),
       amount: req.amount * 10,
       currency: "IRR",
       description: req.description,
@@ -44,7 +45,7 @@ export const zarinpalProvider: PaymentProvider = {
   async verify({ authority, amount, query }) {
     if (query.Status !== "OK") return { ok: false };
     const r = await post<ZpResponse<{ code: number; ref_id: number }>>("/pg/v4/payment/verify.json", {
-      merchant_id: env.ZARINPAL_MERCHANT_ID,
+      merchant_id: cfg("ZARINPAL_MERCHANT_ID"),
       amount: amount * 10,
       authority,
     });

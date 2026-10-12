@@ -46,6 +46,14 @@ const envSchema = z.object({
 
   PAYMENT_PROVIDER: z.enum(["mock", "zarinpal", "pasargad"]).default("mock"),
   ZARINPAL_MERCHANT_ID: z.string().optional(),
+  PASARGAD_BASE_URL: z.string().url().optional(),
+  PASARGAD_TERMINAL: z.string().optional(),
+  PASARGAD_USERNAME: z.string().optional(),
+  PASARGAD_PASSWORD: z.string().optional(),
+  POSTEX_BASE_URL: z.string().url().optional(),
+  POSTEX_API_KEY: z.string().optional(),
+  TIPAX_BASE_URL: z.string().url().optional(),
+  TIPAX_API_KEY: z.string().optional(),
   ZARINPAL_SANDBOX: bool.default(true),
 
   SMS_PROVIDER: z.enum(["console"]).default("console"),

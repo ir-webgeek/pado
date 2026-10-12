@@ -24,6 +24,8 @@ import { audit } from "../../lib/audit";
 import { TtlCache } from "../../lib/cache";
 import { forbidden, notFound } from "../../lib/errors";
 import { walletMove } from "../wallet/service";
+import { describeSettings, saveSettings } from "../../lib/platform";
+import { badRequest } from "../../lib/errors";
 
 const adminCache = new TtlCache<boolean>(30_000);
 
@@ -257,6 +259,17 @@ export const adminRoutes =
         .orderBy(desc(automationEvents.createdAt))
         .limit(100),
     );
+
+    // platform configuration: API keys, gateway, carriers (secrets are write-only)
+    app.get("/platform-settings", async () => ({ settings: describeSettings() }));
+    app.put("/platform-settings", { schema: { body: z.object({ values: z.record(z.string(), z.string().max(4000).nullable()) }) } }, async (req) => {
+      try {
+        await saveSettings(ctx.db, req.body.values, req.user.sub);
+      } catch (err) {
+        throw badRequest("invalid_setting", (err as Error).message);
+      }
+      return { settings: describeSettings() };
+    });
 
     app.get("/fees", async () =>
       ctx.db

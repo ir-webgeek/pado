@@ -4,6 +4,7 @@ import { createDb, customers, resolveShopSettings, shops } from "@shopino/db";
 import { env } from "./config";
 import { QUEUE_NAMES, Queues, type JobName, type JobPayloads } from "./lib/queues";
 import { createRedis } from "./lib/redis";
+import { initPlatformSettings } from "./lib/platform";
 import { expireHoldIfDue } from "./modules/appointments/service";
 import { computeSegment } from "./modules/customers/segments";
 import { handleComment, handleInbound } from "./modules/inbox/pipeline";
@@ -25,6 +26,7 @@ import { refreshInstagramTokens } from "./modules/instagram/token-refresh";
 import { runWooImport } from "./modules/woocommerce/import";
 
 const { db, client } = createDb(env.DATABASE_URL, { max: 10 });
+await initPlatformSettings(db);
 const connection = createRedis({ forWorker: true });
 const redis = createRedis();
 const queues = new Queues(connection);

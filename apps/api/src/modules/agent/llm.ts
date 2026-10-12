@@ -6,10 +6,17 @@ import type { Database } from "@shopino/db";
 import { env } from "../../config";
 import { AppError, badRequest } from "../../lib/errors";
 import { walletBalance, walletMove } from "../wallet/service";
+import { cfg } from "../../lib/platform";
 
-let client: Anthropic | null = null;
-export const anthropic = () => (client ??= new Anthropic({ apiKey: env.ANTHROPIC_API_KEY, maxRetries: 2, timeout: 120_000 }));
-export const aiAvailable = () => Boolean(env.ANTHROPIC_API_KEY);
+let client: { key: string; c: Anthropic } | null = null;
+/** Client for the current key; rebuilt when the super admin changes it in the panel. */
+export const anthropic = () => {
+  const key = cfg("ANTHROPIC_API_KEY") ?? "";
+  if (client?.key !== key) client = { key, c: new Anthropic({ apiKey: key, maxRetries: 2, timeout: 120_000 }) };
+  return client.c;
+};
+export const aiAvailable = () => Boolean(cfg("ANTHROPIC_API_KEY"));
+export const agentModel = () => cfg("AGENT_MODEL") ?? env.AGENT_MODEL;
 
 export interface Usage {
   input: number;
@@ -42,7 +49,7 @@ export async function chargeAi(db: Database, shopId: string, u: Usage, ref: { ty
 }
 
 export async function assertAiReady(db: Database, shopId: string) {
-  if (!aiAvailable()) throw badRequest("ai_not_configured", "ANTHROPIC_API_KEY is not set on the server");
+  if (!aiAvailable()) throw badRequest("ai_not_configured", "the AI API key is not set (super admin > platform settings)");
   if ((await walletBalance(db, shopId)) < env.AGENT_MIN_BALANCE) throw new AppError(402, "wallet_insufficient", "top up the wallet to use AI features");
 }
 
@@ -58,7 +65,7 @@ export async function structured<S extends z.ZodType>(opts: {
   effort?: "low" | "medium" | "high";
 }): Promise<{ data: z.infer<S>; usage: Usage }> {
   const res = await anthropic().beta.messages.parse({
-    model: env.AGENT_MODEL,
+    model: agentModel(),
     max_tokens: opts.maxTokens ?? 8000,
     system: opts.system,
     messages: [{ role: "user", content: opts.content }],

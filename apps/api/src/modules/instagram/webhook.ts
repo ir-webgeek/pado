@@ -5,6 +5,7 @@ import { env } from "../../config";
 import { TtlCache } from "../../lib/cache";
 import type { Ctx } from "../../lib/context";
 import { verifySignature } from "./client";
+import { cfg } from "../../lib/platform";
 
 interface IgWebhook {
   object?: string;
@@ -44,7 +45,7 @@ export const instagramWebhook =
 
     app.get("/instagram", async (req, reply) => {
       const q = req.query as Record<string, string | undefined>;
-      if (q["hub.mode"] === "subscribe" && q["hub.verify_token"] === env.META_VERIFY_TOKEN) return reply.type("text/plain").send(q["hub.challenge"] ?? "");
+      if (q["hub.mode"] === "subscribe" && q["hub.verify_token"] === cfg("META_VERIFY_TOKEN")) return reply.type("text/plain").send(q["hub.challenge"] ?? "");
       return reply.status(403).send("forbidden");
     });
 

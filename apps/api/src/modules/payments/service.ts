@@ -8,6 +8,7 @@ import { markAppointmentPaid } from "../appointments/service";
 import { markOrderPaid } from "../orders/service";
 import { customerWalletMove, walletMove } from "../wallet/service";
 import { activeProvider, providerByName } from "./providers";
+import { cfg, cfgNumber } from "../../lib/platform";
 
 export type PaymentStart =
   | { kind: "redirect"; url: string; paymentId: string }
@@ -23,7 +24,7 @@ async function start(
 ): Promise<PaymentStart> {
   if (input.amount <= 0) return { kind: "paid" };
   // commission applies to customer payments only (not the shop's own wallet top-ups)
-  const platformFee = input.purpose === "wallet_topup" ? 0 : Math.round((input.amount * env.PLATFORM_FEE_PERCENT) / 100);
+  const platformFee = input.purpose === "wallet_topup" ? 0 : Math.round((input.amount * cfgNumber("PLATFORM_FEE_PERCENT", env.PLATFORM_FEE_PERCENT)) / 100);
   if (input.method === "card_to_card") {
     const shop = await db.query.shops.findFirst({ where: eq(shops.id, input.shopId) });
     const card = resolveShopSettings(shop!.settings).cardToCard;
@@ -48,10 +49,10 @@ async function start(
     callbackUrl: `${publicApiUrl()}/v1/pay/callback/${provider.name}?pid=${p!.id}`,
     mobile: input.mobile,
     splits:
-      provider.supportsSplit && shop?.settlementIban && env.PLATFORM_IBAN && platformFee > 0
+      provider.supportsSplit && shop?.settlementIban && cfg("PLATFORM_IBAN") && platformFee > 0
         ? [
             { iban: shop.settlementIban, amount: input.amount - platformFee, role: "merchant" },
-            { iban: env.PLATFORM_IBAN, amount: platformFee, role: "platform" },
+            { iban: cfg("PLATFORM_IBAN")!, amount: platformFee, role: "platform" },
           ]
         : undefined,
   });

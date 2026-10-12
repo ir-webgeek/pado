@@ -1,5 +1,6 @@
 import { env } from "../../config";
 import { hmacSha256Hex, safeEqual } from "../../lib/crypto";
+import { cfg } from "../../lib/platform";
 
 /**
  * Instagram API with Instagram Login - messaging.
@@ -14,7 +15,7 @@ export interface IgAccount {
   accessToken: string;
 }
 
-const graph = (path: string) => `https://graph.instagram.com/${env.META_GRAPH_VERSION}/${path}`;
+const graph = (path: string) => `https://graph.instagram.com/${cfg("META_GRAPH_VERSION") ?? env.META_GRAPH_VERSION}/${path}`;
 
 async function post(account: IgAccount, body: unknown, path = `${account.igUserId}/messages`) {
   const res = await fetch(graph(path), {
@@ -120,7 +121,8 @@ export async function listMedia(account: IgAccount, limit = 50): Promise<IgMedia
 
 /** Meta signs webhook payloads with the app secret: X-Hub-Signature-256: sha256=<hex hmac of raw body>. */
 export function verifySignature(rawBody: Buffer, header: string | undefined): boolean {
-  if (!env.META_APP_SECRET) return env.NODE_ENV !== "production";
+  const appSecret = cfg("META_APP_SECRET");
+  if (!appSecret) return env.NODE_ENV !== "production";
   if (!header?.startsWith("sha256=")) return false;
-  return safeEqual(header.slice(7), hmacSha256Hex(env.META_APP_SECRET, rawBody));
+  return safeEqual(header.slice(7), hmacSha256Hex(appSecret, rawBody));
 }

@@ -1,5 +1,6 @@
 import { env } from "../../config";
 import { buildAuthorizeUrl, unwrap } from "./oauth-state";
+import { cfg } from "../../lib/platform";
 
 /**
  * Instagram API with Instagram Login - business login (OAuth). Endpoints and parameters follow Meta's
@@ -15,11 +16,11 @@ export const IG_SCOPES = ["instagram_business_basic", "instagram_business_manage
 /** the fields the webhook handler processes (story mentions arrive inside `messages`) */
 export const IG_WEBHOOK_FIELDS = ["messages", "comments"];
 
-export const instagramOAuthConfigured = () => Boolean(env.INSTAGRAM_APP_ID && (env.INSTAGRAM_APP_SECRET ?? env.META_APP_SECRET));
-const secret = () => env.INSTAGRAM_APP_SECRET ?? env.META_APP_SECRET ?? "";
-const graph = (path: string) => `https://graph.instagram.com/${env.META_GRAPH_VERSION}/${path}`;
+export const instagramOAuthConfigured = () => Boolean(cfg("INSTAGRAM_APP_ID") && (cfg("INSTAGRAM_APP_SECRET") ?? cfg("META_APP_SECRET")));
+const secret = () => cfg("INSTAGRAM_APP_SECRET") ?? cfg("META_APP_SECRET") ?? "";
+const graph = (path: string) => `https://graph.instagram.com/${cfg("META_GRAPH_VERSION") ?? env.META_GRAPH_VERSION}/${path}`;
 
-export const authorizeUrl = (redirectUri: string, state: string) => buildAuthorizeUrl(env.INSTAGRAM_APP_ID ?? "", redirectUri, IG_SCOPES, state);
+export const authorizeUrl = (redirectUri: string, state: string) => buildAuthorizeUrl(cfg("INSTAGRAM_APP_ID") ?? "", redirectUri, IG_SCOPES, state);
 
 async function call<T extends object>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, { ...init, signal: AbortSignal.timeout(15_000) });
@@ -33,7 +34,7 @@ async function call<T extends object>(url: string, init?: RequestInit): Promise<
 
 export async function exchangeCode(code: string, redirectUri: string) {
   const body = new FormData();
-  body.set("client_id", env.INSTAGRAM_APP_ID ?? "");
+  body.set("client_id", cfg("INSTAGRAM_APP_ID") ?? "");
   body.set("client_secret", secret());
   body.set("grant_type", "authorization_code");
   body.set("redirect_uri", redirectUri);

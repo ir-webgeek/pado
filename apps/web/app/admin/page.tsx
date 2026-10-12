@@ -14,7 +14,7 @@ import { dateTime, money, num } from "@/lib/format";
 import type { DictKey } from "@/lib/i18n";
 import { useI18n } from "@/lib/locale-client";
 
-type Tab = "overview" | "shops" | "bookings" | "dms" | "fees";
+type Tab = "overview" | "shops" | "bookings" | "dms" | "fees" | "config";
 
 /** Platform super admin: clients (shops), their reservations, and how automated DMs are being handled. */
 export default function AdminPage() {
@@ -56,6 +56,7 @@ export default function AdminPage() {
               { value: "bookings", label: t("ad.bookings") },
               { value: "dms", label: t("ad.dms") },
               { value: "fees", label: t("ad.fees") },
+              { value: "config", label: t("ad.config") },
             ]}
           />
           {shopFilter && (
@@ -69,6 +70,7 @@ export default function AdminPage() {
         {tab === "bookings" && <Bookings shopId={shopFilter?.id} />}
         {tab === "dms" && <Dms shopId={shopFilter?.id} />}
         {tab === "fees" && <Fees />}
+        {tab === "config" && <PlatformConfig />}
       </main>
     </div>
   );
@@ -406,5 +408,90 @@ function Fees() {
         </tbody>
       </table>
     </Card>
+  );
+}
+
+interface SettingRow {
+  key: string;
+  group: "ai" | "meta" | "payment" | "shipping" | "notify";
+  label: { fa: string; en: string };
+  hint?: { fa: string; en: string };
+  secret?: boolean;
+  options?: string[];
+  kind?: "url" | "number" | "text";
+  source: "panel" | "env" | "unset";
+  value: string | null;
+  preview: string | null;
+}
+
+/** API keys, gateway and carrier addresses. Secrets are write-only: the form shows only whether one is set. */
+function PlatformConfig() {
+  const { t, locale } = useI18n();
+  const { data, mutate } = useApi<{ settings: SettingRow[] }>("/admin/platform-settings");
+  const [draft, setDraft] = useState<Record<string, string>>({});
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  if (!data) return <Spinner />;
+  const groups = ["ai", "meta", "payment", "shipping", "notify"] as const;
+  const save = async () => {
+    setBusy(true);
+    setMsg(null);
+    try {
+      const r = await api<{ settings: SettingRow[] }>("/admin/platform-settings", { method: "PUT", json: { values: draft } });
+      await mutate(r, false);
+      setDraft({});
+      setMsg({ ok: true, text: t("s.saved") });
+    } catch (e) {
+      setMsg({ ok: false, text: (e as Error).message });
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="space-y-4">
+      <p className="text-sm muted">{t("ad.configSub")}</p>
+      {groups.map((g) => (
+        <Card key={g} className="space-y-3">
+          <h3 className="font-semibold strong">{t(`ad.cfg.${g}` as DictKey)}</h3>
+          <div className="grid gap-3 sm:grid-cols-2">
+            {data.settings
+              .filter((s) => s.group === g)
+              .map((s) => (
+                <label key={s.key} className="block space-y-1">
+                  <span className="flex items-center justify-between gap-2 text-sm">
+                    <span className="strong">{s.label[locale === "fa" ? "fa" : "en"]}</span>
+                    <Badge tone={s.source === "panel" ? "success" : s.source === "env" ? "neutral" : "warning"}>{t(`ad.src.${s.source}` as DictKey)}</Badge>
+                  </span>
+                  {s.options ? (
+                    <Select value={draft[s.key] ?? s.value ?? ""} onChange={(e) => setDraft({ ...draft, [s.key]: e.target.value })}>
+                      {s.options.map((o) => (
+                        <option key={o} value={o}>
+                          {o === "mock" ? `${o} (${t("ad.demo")})` : o}
+                        </option>
+                      ))}
+                    </Select>
+                  ) : (
+                    <Input
+                      dir="ltr"
+                      type={s.secret ? "password" : "text"}
+                      autoComplete="off"
+                      placeholder={s.secret ? (s.preview ?? "") : ""}
+                      value={draft[s.key] ?? (s.secret ? "" : (s.value ?? ""))}
+                      onChange={(e) => setDraft({ ...draft, [s.key]: e.target.value })}
+                    />
+                  )}
+                  {s.hint && <span className="block text-xs muted">{s.hint[locale === "fa" ? "fa" : "en"]}</span>}
+                </label>
+              ))}
+          </div>
+        </Card>
+      ))}
+      <div className="flex items-center justify-end gap-3">
+        {msg && <span className={msg.ok ? "text-sm text-success" : "text-sm text-danger"}>{msg.text}</span>}
+        <Button variant="primary" loading={busy} disabled={!Object.keys(draft).length} onClick={save}>
+          {t("a.save")}
+        </Button>
+      </div>
+    </div>
   );
 }

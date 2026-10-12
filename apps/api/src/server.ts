@@ -3,8 +3,10 @@ import { buildApp } from "./app";
 import { env } from "./config";
 import { Queues } from "./lib/queues";
 import { createRedis } from "./lib/redis";
+import { initPlatformSettings } from "./lib/platform";
 
 const { db, client } = createDb(env.DATABASE_URL, { max: env.DB_POOL_MAX });
+await initPlatformSettings(db);
 const redis = createRedis();
 const queues = new Queues(createRedis({ forWorker: true }));
 const app = await buildApp({ db, redis, queues });

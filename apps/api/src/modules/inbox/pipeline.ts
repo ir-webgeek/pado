@@ -5,7 +5,7 @@ import { env } from "../../config";
 import type { Queues } from "../../lib/queues";
 import type { Redis } from "ioredis";
 import { agentAvailable, runAgent } from "../agent/agent";
-import { chargeAi } from "../agent/llm";
+import { agentModel, chargeAi } from "../agent/llm";
 import { applyThenMode, dmTagText, recordRuleHit, sendRuleMessages } from "../automations/execute";
 import { matchRule, type Trigger } from "../automations/match";
 import { upsertCustomer } from "../customers/service";
@@ -151,7 +151,7 @@ export async function handleInbound(db: Database, queues: Queues, redis: Redis, 
   try {
     result = await runAgent({ name: shop.name, kind: shop.kind, timezone: shop.timezone, settings }, toolCtx, msg.pageContext);
   } catch (err) {
-    await db.insert(agentRuns).values({ shopId: shop.id, conversationId: conv!.id, channel: msg.channel, model: env.AGENT_MODEL, tools: toolCtx.toolLog, error: (err as Error).message.slice(0, 500) });
+    await db.insert(agentRuns).values({ shopId: shop.id, conversationId: conv!.id, channel: msg.channel, model: agentModel(), tools: toolCtx.toolLog, error: (err as Error).message.slice(0, 500) });
     await db.update(conversations).set({ needsHuman: true }).where(eq(conversations.id, conv!.id));
     throw err;
   }
@@ -167,7 +167,7 @@ export async function handleInbound(db: Database, queues: Queues, redis: Redis, 
     shopId: shop.id,
     conversationId: conv!.id,
     channel: msg.channel,
-    model: env.AGENT_MODEL,
+    model: agentModel(),
     inputTokens: result.usage.input + result.usage.cacheRead + result.usage.cacheWrite,
     outputTokens: result.usage.output,
     cost,

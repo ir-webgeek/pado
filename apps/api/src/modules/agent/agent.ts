@@ -3,7 +3,7 @@ import { desc, eq } from "drizzle-orm";
 import { messages, type ShopSettings } from "@shopino/db";
 import { env } from "../../config";
 import { searchKnowledge } from "../knowledge/search";
-import { addUsage, aiAvailable, anthropic, costOf, emptyUsage, type Usage } from "./llm";
+import { addUsage, agentModel, aiAvailable, anthropic, costOf, emptyUsage, type Usage } from "./llm";
 import type { AgentToolContext } from "./tools";
 import { runTool, toolsFor } from "./tools";
 
@@ -110,7 +110,7 @@ export async function runAgent(shop: AgentShop, ctx: AgentToolContext, pageConte
 
   for (let turn = 0; turn < MAX_TURNS; turn++) {
     const res = await anthropic().beta.messages.create({
-      model: env.AGENT_MODEL,
+      model: agentModel(),
       max_tokens: 4000,
       system,
       tools,
