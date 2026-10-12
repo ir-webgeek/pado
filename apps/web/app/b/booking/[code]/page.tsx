@@ -1,5 +1,6 @@
 "use client";
 
+import { Assistant } from "@/components/store/assistant";
 import clsx from "clsx";
 import { CalendarCheck2, CheckCircle2, Clock, XCircle } from "lucide-react";
 import { useSearchParams } from "next/navigation";
@@ -16,7 +17,7 @@ interface BookingResp {
   service: { name: string; durationMin: number };
   staff: { name: string; title: string };
   customer: { name: string | null; walletBalance: number };
-  shop: { name: string; slug: string; brandColor: string; timezone: string };
+  shop: { name: string; slug: string; brandColor: string; timezone: string; assistant?: boolean };
   policy: { cancelWindowMin: number; refundToWallet: boolean };
   paymentMethods: string[];
 }
@@ -76,6 +77,7 @@ function Booking({ code }: { code: string }) {
   return (
     <div data-theme="day" className="min-h-dvh bg-[var(--bg)] px-4 py-10 text-[var(--text-body)]" style={{ "--accent": brand } as React.CSSProperties}>
       <div className="mx-auto max-w-md space-y-4">
+        {data.shop.assistant && <Assistant slug={data.shop.slug} page="booking" mode="booking" />}
         <p className="text-center text-sm muted">{data.shop.name}</p>
         {paid === "1" && <p className="flex items-center gap-2 rounded-xl bg-success/12 px-4 py-3 text-sm text-success"><CheckCircle2 className="size-5" /> {t("co.paid")}</p>}
         {paid === "0" && <p className="flex items-center gap-2 rounded-xl bg-danger/12 px-4 py-3 text-sm text-danger"><XCircle className="size-5" /> {t("co.failed")}</p>}

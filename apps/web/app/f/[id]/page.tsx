@@ -1,5 +1,6 @@
 "use client";
 
+import { Assistant } from "@/components/store/assistant";
 import { CheckCircle2 } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 import { Suspense, use, useState } from "react";
@@ -11,7 +12,7 @@ import { shopAccent } from "@/lib/brand";
 
 interface PublicForm {
   form: { id: string; title: string; description: string; fields: { key: string; label: string; type: string; required: boolean; options?: string[] }[] };
-  shop: { name: string; slug: string; brandColor: string };
+  shop: { name: string; slug: string; brandColor: string; assistant?: boolean };
 }
 
 export default function PublicFormPage({ params }: { params: Promise<{ id: string }> }) {
@@ -58,6 +59,7 @@ function FormView({ id }: { id: string }) {
   return (
     <div data-theme="day" className="min-h-dvh bg-[var(--bg)] px-4 py-10 text-[var(--text-body)]" style={{ "--accent": brand } as React.CSSProperties}>
       <div className="mx-auto max-w-lg">
+        {data.shop?.assistant && <Assistant slug={data.shop.slug} page="form" />}
         <p className="mb-2 text-center text-sm muted">{data.shop?.name}</p>
         <div className="card p-6">
           {done ? (

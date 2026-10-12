@@ -23,15 +23,22 @@ export function getDmRef(): string | undefined {
   }
 }
 
+/** The uid from this page's URL (stored for later pages), else the stored one. */
+export function captureDmRef(): string | undefined {
+  try {
+    const q = new URLSearchParams(window.location.search);
+    const fromUrl = q.get("ref") ?? q.get("utm_id");
+    if (fromUrl) localStorage.setItem(KEY, JSON.stringify({ ref: fromUrl, at: Date.now() }));
+  } catch {}
+  return getDmRef();
+}
+
 export function DmRefTracker() {
   const pathname = usePathname();
   useEffect(() => {
     if (!CUSTOMER_PAGES.test(pathname)) return;
     try {
-      const q = new URLSearchParams(window.location.search);
-      const fromUrl = q.get("ref") ?? q.get("utm_id");
-      if (fromUrl) localStorage.setItem(KEY, JSON.stringify({ ref: fromUrl, at: Date.now() }));
-      const ref = getDmRef();
+      const ref = captureDmRef();
       const seen = `dmref-seen:${pathname}`;
       if (!ref || sessionStorage.getItem(seen)) return;
       sessionStorage.setItem(seen, "1");

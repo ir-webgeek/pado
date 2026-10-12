@@ -11,6 +11,7 @@ import { verifyConversationToken } from "../automations/execute";
 import { upsertCustomer } from "../customers/service";
 import { escapeHtml, sendTelegram } from "../notifications/telegram";
 import { validateSubmission } from "./validate";
+import { webAssistantOn } from "../agent/web-assistant";
 
 const params = z.object({ shopId: z.string().uuid() });
 const withId = params.extend({ id: z.string().uuid() });
@@ -54,8 +55,8 @@ export const publicFormRoutes =
     app.get("/forms/:id", { schema: { params: idParams } }, async (req) => {
       const f = await ctx.db.query.forms.findFirst({ where: and(eq(forms.id, req.params.id), eq(forms.active, true)) });
       if (!f) throw notFound("form");
-      const shop = await ctx.db.query.shops.findFirst({ where: eq(shops.id, f.shopId), columns: { name: true, slug: true, brandColor: true } });
-      return { form: { id: f.id, title: f.title, description: f.description, fields: f.fields }, shop };
+      const shop = await ctx.db.query.shops.findFirst({ where: eq(shops.id, f.shopId), columns: { name: true, slug: true, brandColor: true, settings: true, plan: true } });
+      return { form: { id: f.id, title: f.title, description: f.description, fields: f.fields }, shop: shop && { name: shop.name, slug: shop.slug, brandColor: shop.brandColor, assistant: webAssistantOn(shop) } };
     });
 
     app.post(

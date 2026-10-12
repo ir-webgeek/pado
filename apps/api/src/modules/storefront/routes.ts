@@ -32,6 +32,7 @@ import { attachReceipt, startAppointmentPayment, startOrderPayment, handleGatewa
 import { bookAppointment, customerCancelAppointment, getSlots, rescheduleAppointment } from "../appointments/service";
 import { aiAvailable } from "../agent/llm";
 import { verifyConversationToken } from "../automations/execute";
+import { webAssistantOn } from "../agent/web-assistant";
 import { handleInbound } from "../inbox/pipeline";
 
 type ShopRow = typeof shops.$inferSelect;
@@ -118,7 +119,7 @@ export const storefrontRoutes =
           acceptsCardToCard: Boolean(settings.cardToCard.cardNumber),
           loyalty: settings.loyalty.enabled ? { pointValue: settings.loyalty.pointValue } : null,
           landing: shop.landing,
-          assistant: settings.agent.consultOnWeb && planHas(shop.plan, "ai_consult") && aiAvailable(),
+          assistant: webAssistantOn(shop),
         },
         categories: cats,
         shippingMethods: methods.map((m) => ({ id: m.id, name: m.name, carrier: m.carrier, price: m.price, freeOver: m.freeOver })),
@@ -225,6 +226,8 @@ export const storefrontRoutes =
         const shop = await shopOr404(req.params.slug);
         const id = await dmConversation(shop.id, req.query.ref);
         if (!id) return { messages: [] };
+        const dm = await ctx.db.query.conversations.findFirst({ where: eq(conversations.id, id), columns: { username: true, customerId: true } });
+        const cust = dm?.customerId ? await ctx.db.query.customers.findFirst({ where: eq(customers.id, dm.customerId), columns: { name: true } }) : undefined;
         const web = await ctx.db.query.conversations.findFirst({ where: and(eq(conversations.shopId, shop.id), eq(conversations.linkedConversationId, id)), columns: { id: true } });
         const rows = await ctx.db
           .select({ direction: messages.direction, text: messages.text, at: messages.createdAt, conversationId: messages.conversationId })
@@ -233,6 +236,8 @@ export const storefrontRoutes =
           .orderBy(desc(messages.createdAt))
           .limit(40);
         return {
+          username: dm?.username ?? null,
+          customerName: cust?.name ?? null,
           messages: rows
             .reverse()
             .filter((m) => m.text.trim())
@@ -250,7 +255,7 @@ export const storefrontRoutes =
           body: z.object({
             sessionId: z.string().regex(/^[A-Za-z0-9_-]{12,64}$/),
             text: z.string().min(1).max(1000),
-            context: z.object({ productSlug: z.string().max(120).optional(), serviceId: z.string().uuid().optional() }).optional(),
+            context: z.object({ productSlug: z.string().max(120).optional(), serviceId: z.string().uuid().optional(), page: z.enum(["order", "booking", "form", "landing"]).optional() }).optional(),
             /** uid from a DM link: continue that conversation */
             ref: z.string().max(120).optional(),
           }),
@@ -260,7 +265,7 @@ export const storefrontRoutes =
       async (req) => {
         const shop = await shopOr404(req.params.slug);
         const settings = resolveShopSettings(shop.settings);
-        if (!(settings.agent.consultOnWeb && planHas(shop.plan, "ai_consult") && aiAvailable())) throw notFound("assistant");
+        if (!webAssistantOn(shop)) throw notFound("assistant");
         let pageContext: string | undefined;
         if (req.body.context?.productSlug) {
           const p = await ctx.db.query.products.findFirst({ where: and(eq(products.shopId, shop.id), eq(products.slug, req.body.context.productSlug)) });
@@ -268,6 +273,13 @@ export const storefrontRoutes =
         } else if (req.body.context?.serviceId) {
           const s = await ctx.db.query.services.findFirst({ where: and(eq(services.shopId, shop.id), eq(services.id, req.body.context.serviceId)) });
           if (s) pageContext = `booking page for service "${s.name}" (serviceId ${s.id})`;
+        } else if (req.body.context?.page) {
+          pageContext = {
+            order: "the customer's own order page (they already ordered: help with payment, delivery time and questions; hand off to a person for changes or cancellations)",
+            booking: "the customer's own booking page (help with the appointment, deposit and directions; hand off to a person for anything you cannot do)",
+            form: "a form of the shop (help them fill it in)",
+            landing: "the shop's home page (help them discover products or services)",
+          }[req.body.context.page];
         }
         const linked = await dmConversation(shop.id, req.body.ref);
         const r = await handleInbound(ctx.db, ctx.queues, ctx.redis, {
@@ -356,7 +368,7 @@ export const storefrontRoutes =
       return {
         order: { ...order, timeline: events.map((e) => ({ type: e.type, at: e.createdAt })) },
         customer: customer ? { name: customer.name, points: customer.points, walletBalance: wallet } : null,
-        shop: { name: shop!.name, slug: shop!.slug, brandColor: shop!.brandColor, logo: shop!.logo },
+        shop: { name: shop!.name, slug: shop!.slug, brandColor: shop!.brandColor, logo: shop!.logo, assistant: webAssistantOn(shop!) },
         shippingMethods: methods.map((m) => ({ id: m.id, name: m.name, price: m.price, freeOver: m.freeOver })),
         // the final total depends on shipping, so the page decides whether the wallet covers it
         paymentMethods: ["gateway", ...(settings.cardToCard.cardNumber ? ["card_to_card"] : []), ...(wallet > 0 ? ["wallet"] : [])],
@@ -474,7 +486,7 @@ export const storefrontRoutes =
         service: { id: svc!.id, name: svc!.name, durationMin: svc!.durationMin },
         staff: { id: st!.id, name: st!.name, title: st!.title },
         customer: { name: cust?.name, walletBalance: wallet },
-        shop: { name: shop!.name, slug: shop!.slug, brandColor: shop!.brandColor, timezone: shop!.timezone },
+        shop: { name: shop!.name, slug: shop!.slug, brandColor: shop!.brandColor, timezone: shop!.timezone, assistant: webAssistantOn(shop!) },
         policy: { cancelWindowMin: settings.booking.cancelWindowMin, customerReschedule: settings.booking.customerReschedule, refundToWallet: settings.booking.refundToWallet },
         paymentMethods: ["gateway", ...(settings.cardToCard.cardNumber ? ["card_to_card"] : []), ...(wallet >= due && due > 0 ? ["wallet"] : [])],
         card: settings.cardToCard.cardNumber ? settings.cardToCard : null,

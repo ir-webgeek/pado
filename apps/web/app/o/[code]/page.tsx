@@ -1,5 +1,6 @@
 "use client";
 
+import { Assistant } from "@/components/store/assistant";
 import clsx from "clsx";
 import { CheckCircle2, Clock, CreditCard, Landmark, PackageCheck, Truck, Upload, Wallet, XCircle } from "lucide-react";
 import { use, useState } from "react";
@@ -30,7 +31,7 @@ interface OrderResp {
     timeline: { type: string; at: string }[];
   };
   customer: { name: string | null; points: number; walletBalance: number } | null;
-  shop: { name: string; slug: string; brandColor: string };
+  shop: { name: string; slug: string; brandColor: string; assistant?: boolean };
   shippingMethods: { id: string; name: string; price: number; freeOver: number | null }[];
   paymentMethods: ("gateway" | "card_to_card" | "wallet")[];
   loyalty: { pointValue: number } | null;
@@ -65,6 +66,7 @@ function OrderLink({ code }: { code: string }) {
 
   return (
     <Shell brand={data.shop.brandColor}>
+      {data.shop.assistant && <Assistant slug={data.shop.slug} page="order" />}
       <p className="text-sm muted">{data.shop.name}</p>
       <h1 className="num mt-1 text-xl font-bold strong" dir="ltr">
         #{o.code}
