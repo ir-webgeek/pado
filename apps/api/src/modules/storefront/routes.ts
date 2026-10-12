@@ -29,6 +29,7 @@ import { notFound, unauthorized } from "../../lib/errors";
 import { saveUpload } from "../../lib/uploads";
 import { createOrder, getOrderFull, prepareCheckout } from "../orders/service";
 import { attachReceipt, startAppointmentPayment, startOrderPayment, handleGatewayCallback } from "../payments/service";
+import { installmentProvider } from "../payments/providers";
 import { bookAppointment, customerCancelAppointment, getSlots, rescheduleAppointment } from "../appointments/service";
 import { aiAvailable } from "../agent/llm";
 import { verifyConversationToken } from "../automations/execute";
@@ -372,7 +373,7 @@ export const storefrontRoutes =
         shop: { name: shop!.name, slug: shop!.slug, brandColor: shop!.brandColor, logo: shop!.logo, assistant: webAssistantOn(shop!) },
         shippingMethods: methods.map((m) => ({ id: m.id, name: m.name, price: m.price, freeOver: m.freeOver })),
         // the final total depends on shipping, so the page decides whether the wallet covers it
-        paymentMethods: ["gateway", ...(settings.cardToCard.cardNumber ? ["card_to_card"] : []), ...(wallet > 0 ? ["wallet"] : [])],
+        paymentMethods: ["gateway", ...(installmentProvider() ? ["installment"] : []), ...(settings.cardToCard.cardNumber ? ["card_to_card"] : []), ...(wallet > 0 ? ["wallet"] : [])],
         loyalty: settings.loyalty.enabled ? { pointValue: settings.loyalty.pointValue } : null,
         pendingCardPayment: pending ? { id: pending.id, status: pending.status, card: settings.cardToCard } : null,
       };
@@ -490,7 +491,7 @@ export const storefrontRoutes =
         customer: { name: cust?.name, walletBalance: wallet },
         shop: { name: shop!.name, slug: shop!.slug, brandColor: shop!.brandColor, timezone: shop!.timezone, assistant: webAssistantOn(shop!) },
         policy: { cancelWindowMin: settings.booking.cancelWindowMin, customerReschedule: settings.booking.customerReschedule, refundToWallet: settings.booking.refundToWallet },
-        paymentMethods: ["gateway", ...(settings.cardToCard.cardNumber ? ["card_to_card"] : []), ...(wallet >= due && due > 0 ? ["wallet"] : [])],
+        paymentMethods: ["gateway", ...(installmentProvider() && due > 0 ? ["installment"] : []), ...(settings.cardToCard.cardNumber ? ["card_to_card"] : []), ...(wallet >= due && due > 0 ? ["wallet"] : [])],
         card: settings.cardToCard.cardNumber ? settings.cardToCard : null,
       };
     });
@@ -531,4 +532,17 @@ export const payCallbackRoutes =
       const { redirect } = await handleGatewayCallback(ctx.db, ctx.queues, req.params.provider, req.query);
       return reply.redirect(redirect, 303);
     });
+    // some gateways (TorobPay) come back with a form POST; its fields join the query for verification
+    app.addContentTypeParser("application/x-www-form-urlencoded", { parseAs: "string", bodyLimit: 16_384 }, (_req, body, done) => {
+      done(null, Object.fromEntries(new URLSearchParams(body as string)));
+    });
+    app.post(
+      "/callback/:provider",
+      { schema: { params: z.object({ provider: z.string() }), querystring: z.record(z.string(), z.string()), body: z.record(z.string(), z.string()).optional() } },
+      async (req, reply) => {
+        // the query (our pid) wins over posted fields
+        const { redirect } = await handleGatewayCallback(ctx.db, ctx.queues, req.params.provider, { ...(req.body ?? {}), ...req.query });
+        return reply.redirect(redirect, 303);
+      },
+    );
   };

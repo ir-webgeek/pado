@@ -20,6 +20,7 @@ import {
   sendCampaign,
 } from "./modules/notifications/notify";
 import { expireOrderIfDue } from "./modules/orders/service";
+import { retryProviderSettle } from "./modules/payments/service";
 import { refreshUsdRateFromSource } from "./modules/pricing/service";
 import { analyzeMedia, syncMedia } from "./modules/instagram/importer";
 import { refreshInstagramTokens } from "./modules/instagram/token-refresh";
@@ -78,6 +79,7 @@ const handlers: Handlers = {
   "woocommerce.import": ({ importId }) => runWooImport(db, importId),
   "knowledge.autosetup": ({ shopId, fetchComments }) => autoSetupKnowledge(db, shopId, { fetchComments }),
   "instagram.sync-media": ({ shopId }) => syncMedia(db, shopId),
+  "payment.settle-retry": ({ paymentId }) => retryProviderSettle(db, paymentId),
   "knowledge.nightly": async () => {
     // shops that keep auto-learn on get their synced knowledge rebuilt, spread over the queue
     for (const s of await db.select({ id: shops.id, settings: shops.settings }).from(shops)) {

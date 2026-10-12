@@ -3,7 +3,7 @@
 import { Assistant } from "@/components/store/assistant";
 import { ReceiptPrinter } from "@/components/receipt-printer";
 import clsx from "clsx";
-import { CheckCircle2, Clock, CreditCard, Landmark, PackageCheck, Truck, Upload, Wallet, XCircle } from "lucide-react";
+import { CalendarRange, CheckCircle2, Clock, CreditCard, Landmark, PackageCheck, Truck, Upload, Wallet, XCircle } from "lucide-react";
 import { use, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { Suspense } from "react";
@@ -34,7 +34,7 @@ interface OrderResp {
   customer: { name: string | null; points: number; walletBalance: number } | null;
   shop: { name: string; slug: string; brandColor: string; assistant?: boolean };
   shippingMethods: { id: string; name: string; price: number; freeOver: number | null }[];
-  paymentMethods: ("gateway" | "card_to_card" | "wallet")[];
+  paymentMethods: ("gateway" | "installment" | "card_to_card" | "wallet")[];
   loyalty: { pointValue: number } | null;
   pendingCardPayment: { id: string; status: string; card: { cardNumber: string; holder: string; bank: string } } | null;
 }
@@ -236,8 +236,14 @@ function Checkout({ code, token, data, onDone }: { code: string; token: string; 
         <div className="grid gap-2 sm:grid-cols-2">
           {data.paymentMethods.map((m) => (
             <button type="button" key={m} onClick={() => setMethod(m)} className={clsx("flex items-center gap-2 rounded-xl border px-3 py-2.5 text-sm", method === m ? "border-[var(--accent)] strong" : "border-[var(--border)] muted")}>
-              {m === "gateway" ? <CreditCard className="size-4" /> : m === "wallet" ? <Wallet className="size-4" /> : <Landmark className="size-4" />}
-              {m === "gateway" ? t("co.gateway") : m === "wallet" ? `${t("w.payWith")} · ${money(data.customer?.walletBalance ?? 0, locale)}` : t("co.cardToCard")}
+              {m === "gateway" ? <CreditCard className="size-4" /> : m === "wallet" ? <Wallet className="size-4" /> : m === "installment" ? <CalendarRange className="size-4" /> : <Landmark className="size-4" />}
+              {m === "gateway"
+                ? t("co.gateway")
+                : m === "wallet"
+                  ? `${t("w.payWith")} · ${money(data.customer?.walletBalance ?? 0, locale)}`
+                  : m === "installment"
+                    ? t("co.installment")
+                    : t("co.cardToCard")}
             </button>
           ))}
         </div>

@@ -26,6 +26,7 @@ export interface JobPayloads {
   "knowledge.autosetup": { shopId: string; fetchComments?: boolean };
   "instagram.sync-media": { shopId: string };
   "knowledge.nightly": Record<string, never>;
+  "payment.settle-retry": { paymentId: string };
   // inbound
   "ig.message": { shopId: string; igsid: string; mid: string; text: string; attachments?: { type: string; url?: string }[]; storyReplyId?: string };
   "ig.comment": { shopId: string; commentId: string; text: string; fromId: string; username?: string; mediaId?: string };
@@ -52,6 +53,7 @@ const queueOf: Record<JobName, keyof typeof QUEUE_NAMES> = {
   "knowledge.autosetup": "inbound",
   "instagram.sync-media": "inbound",
   "knowledge.nightly": "scheduled",
+  "payment.settle-retry": "events",
   "ig.message": "inbound",
   "ig.comment": "inbound",
 };

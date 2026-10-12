@@ -1,13 +1,14 @@
 import { and, eq } from "drizzle-orm";
-import { appointments, orders, payments, resolveShopSettings, shops, type Database } from "@shopino/db";
-import type { PaymentMethod } from "@shopino/shared";
+import { appointments, categories, orderItems, orders, payments, products, resolveShopSettings, services, shops, type Database } from "@shopino/db";
+import { normalizeIranPhone, type PaymentMethod } from "@shopino/shared";
 import { env, publicApiUrl } from "../../config";
 import { badRequest, conflict, notFound } from "../../lib/errors";
 import type { Queues } from "../../lib/queues";
 import { markAppointmentPaid } from "../appointments/service";
 import { markOrderPaid } from "../orders/service";
 import { customerWalletMove, walletMove } from "../wallet/service";
-import { activeProvider, providerByName } from "./providers";
+import { activeProvider, installmentProvider, providerByName } from "./providers";
+import type { InstallmentCart } from "./providers/types";
 import { cfg, cfgNumber } from "../../lib/platform";
 
 export type PaymentStart =
@@ -20,7 +21,18 @@ const webBookingUrl = (a: { code: string; accessToken: string }) => `${env.PUBLI
 
 async function start(
   db: Database,
-  input: { shopId: string; purpose: "order" | "appointment" | "wallet_topup"; orderId?: string; appointmentId?: string; amount: number; method: PaymentMethod; description: string; mobile?: string },
+  input: {
+    shopId: string;
+    purpose: "order" | "appointment" | "wallet_topup";
+    orderId?: string;
+    appointmentId?: string;
+    amount: number;
+    method: PaymentMethod;
+    description: string;
+    mobile?: string;
+    /** for installment (BNPL) providers */
+    cart?: InstallmentCart;
+  },
 ): Promise<PaymentStart> {
   if (input.amount <= 0) return { kind: "paid" };
   // commission applies to customer payments only (not the shop's own wallet top-ups)
@@ -35,19 +47,22 @@ async function start(
       .returning();
     return { kind: "card_to_card", paymentId: p!.id, amount: input.amount, card };
   }
-  if (input.method !== "gateway") throw badRequest("unsupported_method");
+  if (input.method !== "gateway" && input.method !== "installment") throw badRequest("unsupported_method");
 
-  const provider = activeProvider();
+  const provider = input.method === "installment" ? installmentProvider() : activeProvider();
+  if (!provider) throw badRequest("installment_unavailable", "installment payment is not available right now");
+  if (input.method === "installment" && !input.cart) throw badRequest("installment_unavailable", "installments are available for orders and bookings only");
   const [p] = await db
     .insert(payments)
-    .values({ shopId: input.shopId, purpose: input.purpose, orderId: input.orderId, appointmentId: input.appointmentId, provider: provider.name, method: "gateway", amount: input.amount, platformFee })
+    .values({ shopId: input.shopId, purpose: input.purpose, orderId: input.orderId, appointmentId: input.appointmentId, provider: provider.name, method: input.method, amount: input.amount, platformFee })
     .returning();
   const shop = await db.query.shops.findFirst({ where: eq(shops.id, input.shopId), columns: { settlementIban: true } });
   const { authority, redirectUrl } = await provider.request({
     amount: input.amount,
     description: input.description,
     callbackUrl: `${publicApiUrl()}/v1/pay/callback/${provider.name}?pid=${p!.id}`,
-    mobile: input.mobile,
+    mobile: input.mobile ? (normalizeIranPhone(input.mobile) ?? undefined) : undefined,
+    cart: input.cart,
     splits:
       provider.supportsSplit && shop?.settlementIban && cfg("PLATFORM_IBAN") && platformFee > 0
         ? [
@@ -104,6 +119,34 @@ async function payFromWallet(
   return { kind: "paid", paymentId };
 }
 
+/** Order lines and delivery details in the shape installment providers underwrite. */
+async function orderCart(db: Database, o: typeof orders.$inferSelect): Promise<InstallmentCart> {
+  const [shop, lines] = await Promise.all([
+    db.query.shops.findFirst({ where: eq(shops.id, o.shopId), columns: { slug: true } }),
+    db
+      .select({ id: orderItems.id, productId: orderItems.productId, variantId: orderItems.variantId, title: orderItems.title, variantLabel: orderItems.variantLabel, unitPrice: orderItems.unitPrice, quantity: orderItems.quantity, slug: products.slug, category: categories.name })
+      .from(orderItems)
+      .leftJoin(products, eq(products.id, orderItems.productId))
+      .leftJoin(categories, eq(categories.id, products.categoryId))
+      .where(eq(orderItems.orderId, o.id)),
+  ]);
+  return {
+    reference: o.code,
+    items: lines.map((l) => ({
+      id: l.variantId ?? l.id,
+      productId: l.productId ?? l.id,
+      name: l.variantLabel ? `${l.title} - ${l.variantLabel}` : l.title,
+      count: l.quantity,
+      unitAmount: l.unitPrice,
+      category: l.category ?? "",
+      url: l.slug && shop ? `${env.PUBLIC_WEB_URL}/s/${shop.slug}/p/${l.slug}` : "",
+    })),
+    shippingAmount: o.shippingTotal,
+    discountAmount: o.discountTotal + o.pointsDiscount,
+    customer: { name: o.address?.fullName ?? "", province: o.address?.province ?? "", city: o.address?.city ?? "", address: o.address?.line ?? "", postalCode: o.address?.postalCode ?? "" },
+  };
+}
+
 export async function startOrderPayment(db: Database, queues: Queues, orderId: string): Promise<PaymentStart> {
   const o = await db.query.orders.findFirst({ where: eq(orders.id, orderId) });
   if (!o) throw notFound("order");
@@ -124,6 +167,7 @@ export async function startOrderPayment(db: Database, queues: Queues, orderId: s
     method: o.paymentMethod ?? "gateway",
     description: `Order ${o.code}`,
     mobile: o.address?.phone,
+    cart: o.paymentMethod === "installment" ? await orderCart(db, o) : undefined,
   });
 }
 
@@ -134,11 +178,37 @@ export async function startAppointmentPayment(db: Database, queues: Queues, appo
   if (a.status === "cancelled") throw conflict("appointment_cancelled", "this booking was cancelled");
   const amount = a.depositAmount > 0 ? a.depositAmount : a.price - a.discountTotal;
   if (method === "wallet") return payFromWallet(db, queues, { purpose: "appointment", appointmentId: a.id, shopId: a.shopId, customerId: a.customerId, amount });
-  return start(db, { shopId: a.shopId, purpose: "appointment", appointmentId: a.id, amount, method, description: `Booking ${a.code}` });
+  let cart: InstallmentCart | undefined;
+  let mobile: string | undefined;
+  if (method === "installment") {
+    const [svc, cust] = await Promise.all([
+      db.query.services.findFirst({ where: eq(services.id, a.serviceId), columns: { name: true } }),
+      db.query.customers.findFirst({ where: (c, { eq: e }) => e(c.id, a.customerId), columns: { name: true, phone: true } }),
+    ]);
+    mobile = cust?.phone ?? undefined;
+    cart = {
+      reference: a.code,
+      items: [{ id: a.id, productId: a.serviceId, name: svc?.name ?? "Booking", count: 1, unitAmount: amount, category: "خدمات", url: "" }],
+      shippingAmount: 0,
+      discountAmount: 0,
+      customer: { name: cust?.name ?? "", province: "", city: "", address: "", postalCode: "" },
+    };
+  }
+  return start(db, { shopId: a.shopId, purpose: "appointment", appointmentId: a.id, amount, method, description: `Booking ${a.code}`, mobile, cart });
 }
 
 export async function startWalletTopup(db: Database, shopId: string, amount: number): Promise<PaymentStart> {
   return start(db, { shopId, purpose: "wallet_topup", amount, method: "gateway", description: "Wallet top-up" });
+}
+
+/** Background retry of an installment settle that failed during the callback (throws so the queue retries). */
+export async function retryProviderSettle(db: Database, paymentId: string) {
+  const p = await db.query.payments.findFirst({ where: eq(payments.id, paymentId) });
+  if (!p?.authority || !(p.meta as { settlePending?: boolean } | null)?.settlePending) return;
+  const provider = providerByName(p.provider);
+  if (!provider?.settle) return;
+  if (!(await provider.settle(p.authority))) throw new Error(`${p.provider} settle still failing for payment ${p.id}`);
+  await db.update(payments).set({ meta: { settlePending: false, settledAt: new Date().toISOString() } }).where(eq(payments.id, p.id));
 }
 
 /** Marks a payment paid and applies it to whatever it was for. Shared by gateway callbacks and receipt approval. */
@@ -170,8 +240,16 @@ export async function handleGatewayCallback(db: Database, queues: Queues, provid
   if (!ok) {
     const res = await provider.verify({ authority: p.authority, amount: p.amount, query });
     ok = res.ok;
-    if (ok) await settle(db, queues, p.id, res.refId);
-    else await db.update(payments).set({ status: "failed", meta: (res.raw as object) ?? null }).where(eq(payments.id, p.id));
+    if (ok) {
+      await settle(db, queues, p.id, res.refId);
+      // approved by the installment provider but its settle call did not go through: retry in the background
+      if (res.settlePending) {
+        await db.update(payments).set({ meta: { settlePending: true } }).where(eq(payments.id, p.id));
+        await queues.add("payment.settle-retry", { paymentId: p.id }, { attempts: 8, backoff: { type: "exponential", delay: 60_000 } });
+      }
+    } else {
+      await db.update(payments).set({ status: "failed", meta: (res.raw as object) ?? null }).where(eq(payments.id, p.id));
+    }
   }
   return { payment: p, ok, redirect: await resultUrl(db, p, ok) };
 }

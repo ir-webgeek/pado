@@ -47,7 +47,7 @@ function Booking({ code }: { code: string }) {
   const canCancel = ["pending", "confirmed"].includes(b.status) && new Date(b.startsAt).getTime() - Date.now() > data.policy.cancelWindowMin * 60_000;
   const paid = sp.get("paid");
 
-  const pay = async (method: "gateway" | "wallet") => {
+  const pay = async (method: "gateway" | "installment" | "wallet") => {
     setBusy(true);
     setError(null);
     try {
@@ -120,6 +120,11 @@ function Booking({ code }: { code: string }) {
             {due && (
               <Button variant="primary" size="lg" className="w-full" loading={busy} onClick={() => pay("gateway")}>
                 {t("bk.payDeposit")}
+              </Button>
+            )}
+            {due && data.paymentMethods.includes("installment") && (
+              <Button size="lg" className="w-full" loading={busy} onClick={() => pay("installment")}>
+                {t("co.installment")}
               </Button>
             )}
             {due && data.paymentMethods.includes("wallet") && (
