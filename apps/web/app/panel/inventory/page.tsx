@@ -22,6 +22,7 @@ interface StockRow {
   stock: number;
   reserved: number;
   value: number | null;
+  stockPoolId: string | null;
 }
 interface Valuation {
   items: StockRow[];
@@ -44,7 +45,7 @@ const digits = (s: string) => Number(latinDigits(s).replace(/\D/g, "") || 0);
 export default function InventoryPage() {
   const { t } = useI18n();
   const { shop } = useShop();
-  const [tab, setTab] = useState<"stock" | "receipts">("stock");
+  const [tab, setTab] = useState<"stock" | "receipts" | "pools">("stock");
   const [creating, setCreating] = useState(false);
   const { data: valuation, mutate: reloadStock } = useApi<Valuation>(`/shops/${shop.id}/inventory/valuation`);
   const { data: receipts, mutate: reloadReceipts } = useApi<ReceiptRow[]>(tab === "receipts" ? `/shops/${shop.id}/inventory/receipts` : null);
@@ -65,10 +66,11 @@ export default function InventoryPage() {
           items={[
             { value: "stock", label: t("wh.stock") },
             { value: "receipts", label: t("wh.receipts") },
+            { value: "pools", label: t("pool.tab") },
           ]}
         />
       </div>
-      {tab === "stock" ? <StockTab data={valuation} onChanged={reloadStock} /> : <ReceiptsTab rows={receipts} />}
+      {tab === "stock" ? <StockTab data={valuation} onChanged={reloadStock} /> : tab === "pools" ? <PoolsTab variants={valuation?.items ?? []} onChanged={reloadStock} /> : <ReceiptsTab rows={receipts} />}
       {creating && valuation && (
         <ReceiptModal
           variants={valuation.items}
@@ -122,6 +124,11 @@ function StockTab({ data, onChanged }: { data: Valuation | undefined; onChanged:
                     <td className="px-3 py-2">
                       <span className="strong">{r.title}</span>
                       {r.variantLabel && <span className="muted"> · {r.variantLabel}</span>}
+                      {r.stockPoolId && (
+                        <Badge tone="info" className="ms-1.5">
+                          {t("pool.tab")}
+                        </Badge>
+                      )}
                       {r.sku && <span className="block text-[11px] muted" dir="ltr">{r.sku}</span>}
                     </td>
                     <td className="px-3 py-2 text-end">
@@ -371,6 +378,201 @@ function ReceiptModal({ variants, onClose, onSaved }: { variants: StockRow[]; on
             </Button>
           </div>
         </div>
+      </div>
+    </Modal>
+  );
+}
+
+interface Pool {
+  id: string;
+  name: string;
+  stock: number;
+  reserved: number;
+  members: { variantId: string; productId: string; title: string; variantLabel: string; sku: string | null }[];
+}
+
+/** Shared stock: several products (or variants) that sell the same physical item, so selling one lowers all. */
+function PoolsTab({ variants, onChanged }: { variants: StockRow[]; onChanged: () => void }) {
+  const { t, locale } = useI18n();
+  const { shop } = useShop();
+  const { data, mutate } = useApi<Pool[]>(`/shops/${shop.id}/inventory/pools`);
+  const [creating, setCreating] = useState(false);
+  const [adding, setAdding] = useState<Pool | null>(null);
+  const [error, setError] = useState<unknown>(null);
+  const reload = () => (mutate(), onChanged());
+  const run = async (fn: () => Promise<unknown>) => {
+    setError(null);
+    try {
+      await fn();
+      reload();
+    } catch (e) {
+      setError(e);
+    }
+  };
+  if (!data) return <Spinner />;
+  const free = variants.filter((v) => !v.stockPoolId);
+  return (
+    <div className="space-y-4">
+      <Card className="flex flex-wrap items-center justify-between gap-3">
+        <p className="max-w-2xl text-sm muted">{t("pool.sub")}</p>
+        <Button variant="primary" onClick={() => setCreating(true)}>
+          <PackagePlus className="size-4" /> {t("pool.new")}
+        </Button>
+      </Card>
+      <ErrorNote error={error} />
+      {data.length === 0 ? (
+        <Card>
+          <Empty title={t("pool.empty")} />
+        </Card>
+      ) : (
+        <div className="grid gap-3 md:grid-cols-2">
+          {data.map((p) => (
+            <Card key={p.id} className="space-y-3">
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <p className="font-semibold strong">{p.name}</p>
+                  <p className="text-xs muted">{t("pool.members").replace("{n}", num(p.members.length, locale))}</p>
+                </div>
+                <div className="text-end">
+                  <p className="num text-2xl font-bold strong">{num(p.stock - p.reserved, locale)}</p>
+                  <p className="text-[11px] muted">
+                    {t("pool.available")} · {num(p.stock, locale)} {t("pool.total")}
+                  </p>
+                </div>
+              </div>
+              <ul className="divide-y divide-[var(--border)] rounded-xl bg-[var(--surface-sunken)] text-sm">
+                {p.members.map((m) => (
+                  <li key={m.variantId} className="flex items-center justify-between gap-2 px-3 py-2">
+                    <span className="min-w-0 truncate strong">
+                      {m.title} {m.variantLabel && <span className="muted">· {m.variantLabel}</span>}
+                    </span>
+                    <button
+                      type="button"
+                      className="text-xs muted hover:text-danger"
+                      onClick={() => run(() => api(`/shops/${shop.id}/inventory/pools/${p.id}/variants/${m.variantId}`, { method: "DELETE" }))}
+                    >
+                      {t("pool.detach")}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+              <div className="flex justify-between gap-2">
+                <Button size="sm" onClick={() => setAdding(p)}>
+                  {t("pool.add")}
+                </Button>
+                <Button size="sm" variant="ghost" onClick={() => confirm(t("pool.deleteConfirm")) && run(() => api(`/shops/${shop.id}/inventory/pools/${p.id}`, { method: "DELETE" }))}>
+                  {t("pool.delete")}
+                </Button>
+              </div>
+            </Card>
+          ))}
+        </div>
+      )}
+      {creating && <PoolModal variants={free} onClose={() => setCreating(false)} onSaved={() => (setCreating(false), reload())} />}
+      {adding && (
+        <VariantPick
+          title={`${t("pool.add")} · ${adding.name}`}
+          variants={free}
+          onClose={() => setAdding(null)}
+          onPick={(id) =>
+            run(async () => {
+              await api(`/shops/${shop.id}/inventory/pools/${adding.id}/variants`, { method: "POST", json: { variantId: id } });
+              setAdding(null);
+            })
+          }
+        />
+      )}
+    </div>
+  );
+}
+
+function VariantPick({ title, variants, onPick, onClose }: { title: string; variants: StockRow[]; onPick: (id: string) => void; onClose: () => void }) {
+  const { t, locale } = useI18n();
+  const [q, setQ] = useState("");
+  const rows = variants.filter((v) => `${v.title} ${v.variantLabel} ${v.sku ?? ""}`.toLowerCase().includes(q.toLowerCase())).slice(0, 50);
+  return (
+    <Modal open onClose={onClose} title={title}>
+      <Input placeholder={t("wh.search")} value={q} onChange={(e) => setQ(e.target.value)} autoFocus />
+      <ul className="mt-3 max-h-80 divide-y divide-[var(--border)] overflow-y-auto">
+        {rows.map((v) => (
+          <li key={v.variantId}>
+            <button type="button" className="flex w-full items-center justify-between gap-2 px-2 py-2 text-start text-sm hover:bg-[var(--surface-sunken)]" onClick={() => onPick(v.variantId)}>
+              <span className="truncate strong">
+                {v.title} {v.variantLabel && <span className="muted">· {v.variantLabel}</span>}
+              </span>
+              <span className="num text-xs muted">{num(v.stock, locale)}</span>
+            </button>
+          </li>
+        ))}
+      </ul>
+    </Modal>
+  );
+}
+
+function PoolModal({ variants, onClose, onSaved }: { variants: StockRow[]; onClose: () => void; onSaved: () => void }) {
+  const { t, locale } = useI18n();
+  const { shop } = useShop();
+  const [name, setName] = useState("");
+  const [picked, setPicked] = useState<StockRow[]>([]);
+  const [stock, setStock] = useState("");
+  const [q, setQ] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<unknown>(null);
+  const rows = variants.filter((v) => !picked.includes(v) && `${v.title} ${v.variantLabel} ${v.sku ?? ""}`.toLowerCase().includes(q.toLowerCase())).slice(0, 30);
+  const save = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await api(`/shops/${shop.id}/inventory/pools`, {
+        method: "POST",
+        json: { name: name || picked[0]!.title, variantIds: picked.map((p) => p.variantId), ...(stock ? { stock: digits(stock) } : {}) },
+      });
+      onSaved();
+    } catch (e) {
+      setError(e);
+      setBusy(false);
+    }
+  };
+  return (
+    <Modal open onClose={onClose} title={t("pool.new")}>
+      <div className="space-y-3">
+        <Field label={t("pool.name")}>
+          <Input value={name} maxLength={120} placeholder={picked[0]?.title ?? ""} onChange={(e) => setName(e.target.value)} />
+        </Field>
+        <div>
+          <span className="label">{t("pool.pick")}</span>
+          {picked.length > 0 && (
+            <ul className="mb-2 flex flex-wrap gap-1.5">
+              {picked.map((p) => (
+                <li key={p.variantId}>
+                  <button type="button" className="rounded-full bg-[var(--accent-soft)] px-3 py-1 text-xs strong" onClick={() => setPicked(picked.filter((x) => x !== p))}>
+                    {p.title} {p.variantLabel && `· ${p.variantLabel}`} ✕
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+          <Input placeholder={t("wh.search")} value={q} onChange={(e) => setQ(e.target.value)} />
+          <ul className="mt-2 max-h-56 divide-y divide-[var(--border)] overflow-y-auto">
+            {rows.map((v) => (
+              <li key={v.variantId}>
+                <button type="button" className="flex w-full items-center justify-between gap-2 px-2 py-1.5 text-start text-sm hover:bg-[var(--surface-sunken)]" onClick={() => setPicked([...picked, v])}>
+                  <span className="truncate">
+                    {v.title} {v.variantLabel && <span className="muted">· {v.variantLabel}</span>}
+                  </span>
+                  <span className="num text-xs muted">{num(v.stock, locale)}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+        <Field label={t("pool.stock")} hint={t("pool.stockHint")}>
+          <Input inputMode="numeric" value={stock} placeholder={picked[0] ? String(picked[0].stock) : ""} onChange={(e) => setStock(e.target.value)} />
+        </Field>
+        <ErrorNote error={error} />
+        <Button variant="primary" className="w-full" loading={busy} disabled={picked.length < 2} onClick={save}>
+          {t("pool.create")}
+        </Button>
       </div>
     </Modal>
   );

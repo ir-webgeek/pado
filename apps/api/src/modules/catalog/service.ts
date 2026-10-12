@@ -4,6 +4,7 @@ import { tomanFromUsd } from "../pricing/usd";
 import { PLANS, type ProductInput } from "@shopino/shared";
 import type { ShopCtx } from "../../lib/auth";
 import { badRequest, notFound, paymentRequired } from "../../lib/errors";
+import { lockStock } from "../inventory/pools";
 
 export function slugify(input: string) {
   const s = input
@@ -124,6 +125,7 @@ export async function adjustStock(
   input: { variantId: string; delta: number; reason: string; note?: string; refType?: string; refId?: string },
   actorId?: string,
 ) {
+  await lockStock(db, shopId, [input.variantId]);
   const [row] = await db
     .update(productVariants)
     .set({ stock: sql`${productVariants.stock} + ${input.delta}` })

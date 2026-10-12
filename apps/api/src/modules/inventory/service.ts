@@ -3,6 +3,7 @@ import { inventoryMovements, productVariants, products, stockReceiptItems, stock
 import { receiptCode, weightedCost, type StockReceiptInput } from "@shopino/shared";
 import { audit } from "../../lib/audit";
 import { badRequest, notFound } from "../../lib/errors";
+import { lockStock } from "./pools";
 
 /**
  * Books a supplier delivery: stock goes up and each variant's cost becomes the weighted average of
@@ -11,6 +12,7 @@ import { badRequest, notFound } from "../../lib/errors";
 export async function createReceipt(db: Database, shopId: string, input: StockReceiptInput, actorId: string) {
   return db.transaction(async (tx) => {
     const ids = input.items.map((i) => i.variantId);
+    await lockStock(tx, shopId, ids);
     const rows = await tx
       .select()
       .from(productVariants)
@@ -91,8 +93,9 @@ export async function stockValuation(db: DbOrTx, shopId: string) {
   const [totals] = await db
     .select({
       count: sql<number>`count(*)::int`,
-      totalValue: sql<number>`coalesce(sum(${productVariants.costPrice} * ${productVariants.stock}), 0)::bigint`,
-      retailValue: sql<number>`coalesce(sum(${productVariants.price} * ${productVariants.stock}), 0)::bigint`,
+      // shared stock is counted once per pool (members carry the same numbers)
+      totalValue: sql<number>`coalesce(sum(${productVariants.costPrice} * ${productVariants.stock}) filter (where ${productVariants.stockPoolId} is null or ${productVariants.id} = (select min(pv.id::text)::uuid from product_variants pv where pv.stock_pool_id = ${productVariants.stockPoolId})), 0)::bigint`,
+      retailValue: sql<number>`coalesce(sum(${productVariants.price} * ${productVariants.stock}) filter (where ${productVariants.stockPoolId} is null or ${productVariants.id} = (select min(pv.id::text)::uuid from product_variants pv where pv.stock_pool_id = ${productVariants.stockPoolId})), 0)::bigint`,
       missingCost: sql<number>`(count(*) filter (where ${productVariants.costPrice} is null and ${productVariants.stock} > 0))::int`,
     })
     .from(productVariants)
@@ -109,6 +112,7 @@ export async function stockValuation(db: DbOrTx, shopId: string) {
       costPrice: productVariants.costPrice,
       stock: productVariants.stock,
       reserved: productVariants.reserved,
+      stockPoolId: productVariants.stockPoolId,
     })
     .from(productVariants)
     .innerJoin(products, eq(products.id, productVariants.productId))

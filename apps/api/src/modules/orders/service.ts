@@ -21,6 +21,7 @@ import { badRequest, conflict, notFound, paymentRequired } from "../../lib/error
 import { changePoints, recordPurchase, reversePurchase, upsertCustomer } from "../customers/service";
 import { consumeDiscount, evaluateDiscount } from "../discounts/service";
 import { variantLabel } from "../catalog/service";
+import { lockStock } from "../inventory/pools";
 
 async function event(db: DbOrTx, orderId: string, type: string, actor: Actor, data?: unknown) {
   await db.insert(orderEvents).values({ orderId, type, actorType: actor.type, actorId: actor.id ?? null, data: data ?? null });
@@ -47,6 +48,8 @@ export async function createOrder(db: Database, queues: Queues, shopId: string, 
     const qty = new Map<string, number>();
     for (const it of input.items) qty.set(it.variantId, (qty.get(it.variantId) ?? 0) + it.quantity);
     const ids = [...qty.keys()].sort();
+    // variants sharing stock with these are locked too (same id order everywhere)
+    await lockStock(tx, shopId, ids);
 
     const locked = await tx
       .select({ v: productVariants, title: products.title, status: products.status })
@@ -57,11 +60,15 @@ export async function createOrder(db: Database, queues: Queues, shopId: string, 
       .for("update", { of: productVariants });
     if (locked.length !== ids.length) throw badRequest("invalid_items", "some items are not available");
 
+    // a shared stock serves several cart lines at once: check the pool's total demand
+    const poolDemand = new Map<string, number>();
+    for (const { v } of locked) if (v.stockPoolId) poolDemand.set(v.stockPoolId, (poolDemand.get(v.stockPoolId) ?? 0) + qty.get(v.id)!);
     let subtotal = 0;
     const lines = locked.map(({ v, title, status }) => {
       const q = qty.get(v.id)!;
+      const need = v.stockPoolId ? poolDemand.get(v.stockPoolId)! : q;
       if (status !== "active") throw conflict("product_unavailable", `${title} is not available`);
-      if (v.stock - v.reserved < q) throw conflict("out_of_stock", `${title} ${variantLabel(v.attributes)} - only ${Math.max(0, v.stock - v.reserved)} left`);
+      if (v.stock - v.reserved < need) throw conflict("out_of_stock", `${title} ${variantLabel(v.attributes)} - only ${Math.max(0, v.stock - v.reserved)} left`);
       subtotal += v.price * q;
       return { v, title, q };
     });
@@ -190,6 +197,7 @@ export async function markOrderPaid(tx: Tx, orderId: string, actor: Actor, meta:
   if (!["awaiting_payment", "expired"].includes(o.status)) throw conflict("order_not_payable");
 
   const items = await tx.select().from(orderItems).where(eq(orderItems.orderId, o.id));
+  await lockStock(tx, o.shopId, items.flatMap((it) => (it.variantId ? [it.variantId] : [])));
   const wasExpired = o.status === "expired";
   for (const it of items) {
     if (!it.variantId) continue;
@@ -240,6 +248,7 @@ export async function cancelOrder(tx: Tx, orderId: string, actor: Actor, reason 
   if (["cancelled", "expired", "returned"].includes(o.status)) return o;
 
   const items = await tx.select().from(orderItems).where(eq(orderItems.orderId, o.id));
+  await lockStock(tx, o.shopId, items.flatMap((it) => (it.variantId ? [it.variantId] : [])));
   for (const it of items) {
     if (!it.variantId) continue;
     if (o.paymentStatus === "paid") {

@@ -384,6 +384,22 @@ export const products = pgTable(
   ],
 );
 
+/**
+ * Shared inventory: variants of different products that sell the same physical stock (e.g. one item
+ * listed in two collections, or a bundle and its single). Members' stock and reserved are kept equal by
+ * a database trigger, so every reader sees the pool's numbers.
+ */
+export const stockPools = pgTable(
+  "stock_pools",
+  {
+    id: id(),
+    shopId: shopRef(),
+    name: text().notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [index().on(t.shopId)],
+);
+
 export const productVariants = pgTable(
   "product_variants",
   {
@@ -404,12 +420,15 @@ export const productVariants = pgTable(
     reserved: integer().notNull().default(0),
     lowStockThreshold: integer().notNull().default(3),
     position: smallint().notNull().default(0),
+    /** shared inventory with other variants (see stockPools) */
+    stockPoolId: uuid().references(() => stockPools.id, { onDelete: "set null" }),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
   (t) => [
     index().on(t.productId),
     uniqueIndex().on(t.shopId, t.sku),
+    index().on(t.stockPoolId),
     check("stock_non_negative", sql`${t.stock} >= 0`),
     check("reserved_valid", sql`${t.reserved} >= 0 AND ${t.reserved} <= ${t.stock}`),
   ],
