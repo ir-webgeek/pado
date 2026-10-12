@@ -1,0 +1,18 @@
+# DOMAIN comes from .env (e.g. pado.ir). Caddy gets and renews the HTTPS certificate by itself.
+# For a quick test without a domain, set DOMAIN=:80 (plain HTTP on the server's IP).
+{$DOMAIN} {
+	encode zstd gzip
+
+	# API, uploaded files, Instagram webhooks and payment callbacks go straight to Fastify
+	# (bodies are passed through untouched, so webhook signatures stay valid)
+	handle_path /api/* {
+		reverse_proxy api:4000
+	}
+
+	handle {
+		reverse_proxy web:3000
+	}
+
+	# security headers (CSP, HSTS, ...) are set by the web app itself
+	header -Server
+}

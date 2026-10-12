@@ -1,0 +1,18 @@
+# Pado web (Next.js standalone) without Docker. After each build copy the static files once:
+#   cp -r apps/web/.next/static apps/web/.next/standalone/apps/web/.next/static
+#   cp -r apps/web/public apps/web/.next/standalone/apps/web/public
+# then: systemctl enable --now pado-web
+[Unit]
+Description=Pado web (Next.js)
+After=network.target pado-api.service
+
+[Service]
+User=pado
+WorkingDirectory=/opt/pado/apps/web/.next/standalone
+Environment=NODE_ENV=production PORT=3000 HOSTNAME=127.0.0.1 API_INTERNAL_URL=http://127.0.0.1:4000
+ExecStart=/usr/bin/node apps/web/server.js
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

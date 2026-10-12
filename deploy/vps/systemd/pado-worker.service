@@ -1,0 +1,16 @@
+# Pado background jobs without Docker. systemctl enable --now pado-worker
+[Unit]
+Description=Pado worker (queues)
+After=network.target postgresql.service redis-server.service
+
+[Service]
+User=pado
+WorkingDirectory=/opt/pado
+EnvironmentFile=/opt/pado/deploy/vps/.env
+Environment=NODE_ENV=production UPLOAD_DIR=/var/lib/pado/uploads
+ExecStart=/usr/bin/node apps/api/dist/worker.js
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

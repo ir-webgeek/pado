@@ -1,0 +1,17 @@
+# Pado API without Docker. Copy to /etc/systemd/system/, then: systemctl enable --now pado-api
+# .env must also contain DATABASE_URL and REDIS_URL for a non-Docker install.
+[Unit]
+Description=Pado API (Fastify)
+After=network.target postgresql.service redis-server.service
+
+[Service]
+User=pado
+WorkingDirectory=/opt/pado
+EnvironmentFile=/opt/pado/deploy/vps/.env
+Environment=NODE_ENV=production UPLOAD_DIR=/var/lib/pado/uploads API_HOST=127.0.0.1
+ExecStart=/usr/bin/node apps/api/dist/server.js
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

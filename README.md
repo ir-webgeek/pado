@@ -62,7 +62,7 @@ Checks: `pnpm typecheck` and `pnpm test`. The tests cover the slot engine, custo
 
 Demo logins after seeding: shop owner and super admin `09120000000` at `/login`. Customer portal `09121111111` at `/me`.
 
-Production: `docker compose --profile app up --build` (api, worker, web). Run `node apps/api/dist/migrate.js` once per deploy.
+Production on a VPS: see [deploy/vps/README.md](deploy/vps/README.md) (Docker + Caddy HTTPS, one command `./deploy.sh`, backups). `deploy/make-package.sh` builds the zip to upload. Cloudflare options: [deploy/CLOUDFLARE.md](deploy/CLOUDFLARE.md).
 
 ## Scaling notes
 

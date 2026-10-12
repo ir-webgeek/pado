@@ -16,6 +16,9 @@ COPY packages/shared/package.json packages/shared/
 RUN pnpm install --frozen-lockfile --prod --filter @shopino/api...
 COPY --from=build /app/apps/api/dist apps/api/dist
 COPY --from=build /app/packages/db/drizzle packages/db/drizzle
+# uploads live on a volume; the directory must exist and belong to the app user before the volume mounts
+RUN mkdir -p /app/uploads && chown node:node /app/uploads
+ENV UPLOAD_DIR=/app/uploads
 USER node
 EXPOSE 4000
 # run `node apps/api/dist/migrate.js` once per deploy before starting new instances

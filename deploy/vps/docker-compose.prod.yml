@@ -1,0 +1,97 @@
+# Production stack for one VPS: Caddy (HTTPS) -> web (Next.js) and api (Fastify), plus worker, Postgres, Redis.
+# Run from this folder: ./deploy.sh   (see README.md)
+name: pado
+
+x-app: &app
+  env_file: .env
+  restart: unless-stopped
+  depends_on:
+    postgres: { condition: service_healthy }
+    redis: { condition: service_healthy }
+  logging: { driver: json-file, options: { max-size: "10m", max-file: "5" } }
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: pado
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: pado
+    volumes: [pgdata:/var/lib/postgresql/data]
+    # tuned for a 2-4 GB VPS; raise shared_buffers to ~25% of RAM on bigger machines
+    command: ["postgres", "-c", "shared_buffers=256MB", "-c", "effective_cache_size=768MB", "-c", "work_mem=8MB", "-c", "max_connections=100"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pado"]
+      interval: 5s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    # queues must never lose jobs: append-only file, no eviction
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "noeviction"]
+    volumes: [redisdata:/data]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      retries: 20
+
+  api:
+    <<: *app
+    build: { context: ../.., dockerfile: apps/api/Dockerfile }
+    image: pado-api
+    environment:
+      DATABASE_URL: postgres://pado:${POSTGRES_PASSWORD}@postgres:5432/pado
+      REDIS_URL: redis://redis:6379
+    volumes: [uploads:/app/uploads]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:4000/health >/dev/null || exit 1"]
+      interval: 10s
+      retries: 10
+
+  worker:
+    <<: *app
+    image: pado-api
+    command: ["node", "apps/api/dist/worker.js"]
+    environment:
+      DATABASE_URL: postgres://pado:${POSTGRES_PASSWORD}@postgres:5432/pado
+      REDIS_URL: redis://redis:6379
+    volumes: [uploads:/app/uploads]
+
+  # one-shot: applies database migrations (deploy.sh runs it before starting new containers)
+  migrate:
+    <<: *app
+    image: pado-api
+    restart: "no"
+    command: ["node", "apps/api/dist/migrate.js"]
+    environment:
+      DATABASE_URL: postgres://pado:${POSTGRES_PASSWORD}@postgres:5432/pado
+    profiles: [tools]
+
+  web:
+    build: { context: ../.., dockerfile: apps/web/Dockerfile, args: { API_INTERNAL_URL: "http://api:4000" } }
+    image: pado-web
+    restart: unless-stopped
+    depends_on: [api]
+    logging: { driver: json-file, options: { max-size: "10m", max-file: "5" } }
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports: ["80:80", "443:443", "443:443/udp"]
+    environment:
+      DOMAIN: ${DOMAIN:?set DOMAIN in .env}
+      ACME_EMAIL: ${ACME_EMAIL:-}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on: [web, api]
+
+volumes:
+  pgdata:
+  redisdata:
+  uploads:
+  caddy_data:
+  caddy_config:
