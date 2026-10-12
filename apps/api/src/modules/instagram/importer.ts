@@ -11,6 +11,7 @@ import { slugify, upsertProduct } from "../catalog/service";
 import { assertPublicHttpsUrl } from "../../lib/safe-url";
 import { storeFile } from "../../lib/uploads";
 import { listMedia, type IgAccount } from "./client";
+import { parseCaption } from "./caption";
 
 /** Pull the latest posts and reels into ig_media (idempotent on media id). */
 export async function syncMedia(db: Database, shopId: string, limit = 60) {
@@ -21,6 +22,7 @@ export async function syncMedia(db: Database, shopId: string, limit = 60) {
   let added = 0;
   for (const m of items) {
     const childUrls = (m.children?.data ?? []).map((c) => c.media_url).filter((u): u is string => Boolean(u));
+    // every new post gets the free caption scan right away, so products show up pre-filled
     const rows = await db
       .insert(igMedia)
       .values({
@@ -33,6 +35,8 @@ export async function syncMedia(db: Database, shopId: string, limit = 60) {
         permalink: m.permalink ?? null,
         childUrls,
         postedAt: m.timestamp ? new Date(m.timestamp) : null,
+        status: "analyzed",
+        extracted: parseCaption(m.caption ?? ""),
       })
       .onConflictDoNothing()
       .returning({ id: igMedia.id });
@@ -53,6 +57,8 @@ export async function addManualMedia(db: Database, shopId: string, input: { capt
       mediaUrl: input.imageUrls[0] ?? null,
       childUrls: input.imageUrls.slice(1),
       postedAt: new Date(),
+      status: "analyzed",
+      extracted: parseCaption(input.caption),
     })
     .returning();
   return row!;
@@ -93,13 +99,66 @@ export async function analyzeMedia(db: Database, shopId: string, rowIds: string[
         effort: "low",
       });
       await chargeAi(db, shopId, usage, { type: "ig_import", id: row.id });
-      await db.update(igMedia).set({ status: "analyzed", extracted: data satisfies ExtractedProduct }).where(eq(igMedia.id, row.id));
+      await db.update(igMedia).set({ status: "analyzed", extracted: { ...(data satisfies ExtractedProduct), source: "ai" } }).where(eq(igMedia.id, row.id));
       analyzed++;
     } catch (err) {
-      await db.update(igMedia).set({ status: "analyzed", extracted: { isProduct: false, confidence: 0, title: "", description: `analysis failed: ${(err as Error).message}`, price: null, variants: [], category: null } }).where(eq(igMedia.id, row.id));
+      // keep the free caption scan when the AI call fails
+      await db.update(igMedia).set({ status: "analyzed", extracted: row.extracted ?? parseCaption(row.caption) }).where(eq(igMedia.id, row.id));
     }
   }
   return { analyzed };
+}
+
+/** Re-run the free caption scan (no AI) on the given posts, or on every post not yet imported. */
+export async function scanCaptions(db: Database, shopId: string, rowIds?: string[]) {
+  const rows = await db
+    .select({ id: igMedia.id, caption: igMedia.caption, extracted: igMedia.extracted })
+    .from(igMedia)
+    .where(and(eq(igMedia.shopId, shopId), rowIds?.length ? inArray(igMedia.id, rowIds) : inArray(igMedia.status, ["new", "analyzed"])));
+  let scanned = 0;
+  for (const r of rows) {
+    if (r.extracted?.source === "ai") continue; // a finer AI result stays
+    await db.update(igMedia).set({ status: "analyzed", extracted: parseCaption(r.caption) }).where(eq(igMedia.id, r.id));
+    scanned++;
+  }
+  return { scanned };
+}
+
+/** Import several scanned posts at once with what the scan found; posts without a price are skipped. */
+export async function importMany(db: Database, shop: ShopCtx, rowIds: string[], opts: { status: "draft" | "active"; stock: number }, actorId: string) {
+  const rows = await db.select().from(igMedia).where(and(eq(igMedia.shopId, shop.id), inArray(igMedia.id, rowIds)));
+  const imported: { id: string; productId: string }[] = [];
+  const skipped: { id: string; reason: "imported" | "no_price" | "no_title" | "failed" }[] = [];
+  for (const row of rows) {
+    const x = row.extracted;
+    if (row.status === "imported") skipped.push({ id: row.id, reason: "imported" });
+    else if (!x?.price) skipped.push({ id: row.id, reason: "no_price" });
+    else if (!x.title) skipped.push({ id: row.id, reason: "no_title" });
+    else {
+      try {
+        const p = await importAsProduct(
+          db,
+          shop,
+          row.id,
+          {
+            title: x.title,
+            description: x.description,
+            price: x.price,
+            categoryName: x.category ?? undefined,
+            status: opts.status,
+            variants: x.variants.length
+              ? x.variants.map((v) => ({ attributes: v.attributes, price: v.price ?? x.price!, stock: opts.stock }))
+              : [{ attributes: {}, price: x.price, stock: opts.stock }],
+          },
+          actorId,
+        );
+        imported.push({ id: row.id, productId: p.id });
+      } catch {
+        skipped.push({ id: row.id, reason: "failed" });
+      }
+    }
+  }
+  return { imported, skipped };
 }
 
 /** Instagram CDN links expire - copy images into our own storage before using them on products. */

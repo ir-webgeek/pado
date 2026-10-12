@@ -1,7 +1,7 @@
 "use client";
 
 import { ImageOff, Package, Plus, Search, Trash2 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Badge, Button, Card, Empty, ErrorNote, Field, Input, Modal, PageHeader, Select, Spinner, Textarea } from "@/components/ui";
 import { UploadButton } from "@/components/upload";
 import { api, useApi } from "@/lib/api";
@@ -45,6 +45,14 @@ export default function ProductsPage() {
   const [q, setQ] = useState("");
   const [editing, setEditing] = useState<Product | "new" | null>(null);
   const { data, mutate } = useApi<{ items: Product[] }>(`/shops/${shop.id}/products?limit=100${q ? `&q=${encodeURIComponent(q)}` : ""}`);
+  // deep link (e.g. from an imported Instagram post): /panel/products?edit=<id>
+  useEffect(() => {
+    const id = new URLSearchParams(window.location.search).get("edit");
+    if (!id) return;
+    api<Product>(`/shops/${shop.id}/products/${id}`)
+      .then((p) => setEditing(p))
+      .catch(() => undefined);
+  }, [shop.id]);
 
   return (
     <div>

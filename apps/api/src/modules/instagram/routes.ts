@@ -1,13 +1,13 @@
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { igMedia, shops } from "@shopino/db";
 import { badRequest } from "../../lib/errors";
 import { accountStatus, checkAccount, refreshShopToken, resubscribeWebhooks } from "./account";
 import type { Ctx } from "../../lib/context";
 import { requireFeature, requireShop } from "../../lib/auth";
-import { assertAiReady } from "../agent/llm";
-import { addManualMedia, importAsProduct, syncMedia } from "./importer";
+import { aiAvailable, assertAiReady } from "../agent/llm";
+import { addManualMedia, importAsProduct, importMany, scanCaptions, syncMedia } from "./importer";
 
 const params = z.object({ shopId: z.string().uuid() });
 const withId = params.extend({ id: z.string().uuid() });
@@ -15,13 +15,58 @@ const withId = params.extend({ id: z.string().uuid() });
 export const instagramImportRoutes =
   (ctx: Ctx): FastifyPluginAsyncZod =>
   async (app) => {
-    app.get("/:shopId/instagram/media", { preHandler: requireShop(ctx), schema: { params, querystring: z.object({ status: z.enum(["new", "analyzed", "imported", "ignored"]).optional() }) } }, async (req) =>
-      ctx.db
-        .select()
+    // view: products (scanned, look like products) | others (scanned non-products and unscanned) | imported | ignored
+    const VIEWS = ["products", "others", "imported", "ignored"] as const;
+    const isProduct = sql`coalesce((${igMedia.extracted}->>'isProduct')::boolean, false)`;
+    const viewWhere = (view: (typeof VIEWS)[number]) =>
+      view === "products"
+        ? and(eq(igMedia.status, "analyzed"), sql`${isProduct}`)
+        : view === "others"
+          ? or(eq(igMedia.status, "new"), and(eq(igMedia.status, "analyzed"), sql`not ${isProduct}`))
+          : eq(igMedia.status, view);
+    app.get(
+      "/:shopId/instagram/media",
+      {
+        preHandler: requireShop(ctx),
+        schema: { params, querystring: z.object({ status: z.enum(["new", "analyzed", "imported", "ignored"]).optional(), view: z.enum(VIEWS).optional() }) },
+      },
+      async (req) =>
+        ctx.db
+          .select()
+          .from(igMedia)
+          .where(
+            and(
+              eq(igMedia.shopId, req.shop.id),
+              req.query.view ? viewWhere(req.query.view) : req.query.status ? eq(igMedia.status, req.query.status) : undefined,
+            ),
+          )
+          .orderBy(desc(igMedia.postedAt))
+          .limit(200),
+    );
+    app.get("/:shopId/instagram/media/counts", { preHandler: requireShop(ctx), schema: { params } }, async (req) => {
+      const [row] = await ctx.db
+        .select({
+          products: sql<number>`count(*) filter (where ${igMedia.status} = 'analyzed' and ${isProduct})::int`,
+          others: sql<number>`count(*) filter (where ${igMedia.status} = 'new' or (${igMedia.status} = 'analyzed' and not ${isProduct}))::int`,
+          imported: sql<number>`count(*) filter (where ${igMedia.status} = 'imported')::int`,
+          ignored: sql<number>`count(*) filter (where ${igMedia.status} = 'ignored')::int`,
+          aiScanned: sql<number>`count(*) filter (where ${igMedia.extracted}->>'source' = 'ai')::int`,
+        })
         .from(igMedia)
-        .where(and(eq(igMedia.shopId, req.shop.id), req.query.status ? eq(igMedia.status, req.query.status) : undefined))
-        .orderBy(desc(igMedia.postedAt))
-        .limit(200),
+        .where(eq(igMedia.shopId, req.shop.id));
+      return { ...row!, aiAvailable: aiAvailable() };
+    });
+    // free caption scan (no AI): instant, also runs on every sync
+    app.post("/:shopId/instagram/scan", { preHandler: requireShop(ctx, "staff"), schema: { params, body: z.object({ ids: z.array(z.string().uuid()).max(200).optional() }) } }, async (req) =>
+      scanCaptions(ctx.db, req.shop.id, req.body.ids),
+    );
+    app.post(
+      "/:shopId/instagram/import-bulk",
+      {
+        preHandler: requireShop(ctx, "staff"),
+        schema: { params, body: z.object({ ids: z.array(z.string().uuid()).min(1).max(30), status: z.enum(["draft", "active"]).default("draft"), stock: z.number().int().min(0).max(10_000).default(1) }) },
+      },
+      async (req) => importMany(ctx.db, req.shop, req.body.ids, { status: req.body.status, stock: req.body.stock }, req.user.sub),
     );
     app.post("/:shopId/instagram/sync", { preHandler: requireShop(ctx, "admin"), schema: { params }, config: { rateLimit: { max: 5, timeWindow: "10 minutes" } } }, async (req) =>
       syncMedia(ctx.db, req.shop.id),
@@ -38,7 +83,15 @@ export const instagramImportRoutes =
       const rows = await ctx.db
         .select({ id: igMedia.id })
         .from(igMedia)
-        .where(and(eq(igMedia.shopId, req.shop.id), req.body.ids?.length ? inArray(igMedia.id, req.body.ids) : eq(igMedia.status, "new")))
+        // default: everything not imported that has only the free caption scan
+        .where(
+          and(
+            eq(igMedia.shopId, req.shop.id),
+            req.body.ids?.length
+              ? inArray(igMedia.id, req.body.ids)
+              : and(inArray(igMedia.status, ["new", "analyzed"]), sql`coalesce(${igMedia.extracted}->>'source', '') <> 'ai'`),
+          ),
+        )
         .limit(50);
       const ids = rows.map((r) => r.id);
       if (ids.length) await ctx.queues.add("instagram.analyze", { shopId: req.shop.id, mediaRowIds: ids });

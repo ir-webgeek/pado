@@ -1196,6 +1196,8 @@ export interface ExtractedProduct {
   price: number | null;
   variants: { attributes: Record<string, string>; price: number | null }[];
   category: string | null;
+  /** rules = free caption parser on sync; ai = image + caption analysis */
+  source?: "rules" | "ai";
 }
 
 export const igMedia = pgTable(

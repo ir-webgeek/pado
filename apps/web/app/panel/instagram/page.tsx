@@ -1,7 +1,7 @@
 "use client";
 
 import clsx from "clsx";
-import { Download, ExternalLink, Images, Plus, Trash2, Wand2 } from "lucide-react";
+import { Download, ExternalLink, Images, Plus, ScanText, Trash2, Wand2 } from "lucide-react";
 import { useState } from "react";
 import { Badge, Button, Card, Empty, ErrorNote, Field, Input, Modal, PageHeader, Select, Spinner, Tabs, Textarea } from "@/components/ui";
 import { api, useApi } from "@/lib/api";
@@ -19,6 +19,7 @@ interface Extracted {
   price: number | null;
   variants: { attributes: Record<string, string>; price: number | null }[];
   category: string | null;
+  source?: "rules" | "ai";
 }
 interface Media {
   id: string;
@@ -55,102 +56,181 @@ export default function InstagramPage() {
   );
 }
 
+type View = "products" | "others" | "imported" | "ignored";
+interface Counts {
+  products: number;
+  others: number;
+  imported: number;
+  ignored: number;
+  aiScanned: number;
+  aiAvailable: boolean;
+}
+
 function InstagramImport() {
   const { t, locale } = useI18n();
   const { shop } = useShop();
-  const [tab, setTab] = useState<"new" | "analyzed" | "imported" | "ignored">("analyzed");
-  const { data, mutate } = useApi<Media[]>(`/shops/${shop.id}/instagram/media?status=${tab}`, { refreshInterval: tab === "new" ? 5000 : 0 });
+  const [view, setView] = useState<View>("products");
+  const { data, mutate } = useApi<Media[]>(`/shops/${shop.id}/instagram/media?view=${view}`);
+  const { data: counts, mutate: reloadCounts } = useApi<Counts>(`/shops/${shop.id}/instagram/media/counts`, { refreshInterval: 15_000 });
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<unknown>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [importing, setImporting] = useState<Media | null>(null);
   const [manual, setManual] = useState(false);
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [bulkStatus, setBulkStatus] = useState<"draft" | "active">("draft");
+  const [bulkStock, setBulkStock] = useState(1);
 
+  const refresh = () => Promise.all([mutate(), reloadCounts()]);
   const run = async (key: string, fn: () => Promise<unknown>) => {
     setBusy(key);
     setError(null);
+    setNotice(null);
     try {
       await fn();
-      await mutate();
+      await refresh();
     } catch (e) {
       setError(e);
     } finally {
       setBusy(null);
     }
   };
+  const switchView = (v: View) => (setView(v), setPicked(new Set()));
+  const toggle = (id: string) =>
+    setPicked((p) => {
+      const n = new Set(p);
+      if (n.has(id)) n.delete(id);
+      else n.add(id);
+      return n;
+    });
+  const ready = (data ?? []).filter((m) => m.extracted?.price && m.extracted.title);
+  const importPicked = () =>
+    run("bulk", async () => {
+      const r = await api<{ imported: unknown[]; skipped: { reason: string }[] }>(`/shops/${shop.id}/instagram/import-bulk`, {
+        method: "POST",
+        json: { ids: [...picked], status: bulkStatus, stock: bulkStock },
+      });
+      setPicked(new Set());
+      setNotice(t("ig.bulkDone").replace("{n}", num(r.imported.length, locale)).replace("{s}", num(r.skipped.length, locale)));
+    });
 
   return (
-    <div>
+    <div className={clsx(picked.size > 0 && "pb-24")}>
       <div className="mb-4 flex flex-wrap justify-end gap-2">
-        {
-          <>
-            <Button onClick={() => setManual(true)}>
-              <Plus className="size-4" /> {t("ig.manual")}
-            </Button>
-            <Button loading={busy === "sync"} onClick={() => run("sync", () => api(`/shops/${shop.id}/instagram/sync`, { method: "POST" }).then(() => setTab("new")))}>
-              <Download className="size-4" /> {t("ig.sync")}
-            </Button>
-            <Button variant="primary" loading={busy === "analyze"} onClick={() => run("analyze", () => api(`/shops/${shop.id}/instagram/analyze`, { method: "POST", json: {} }).then(() => setTab("new")))}>
-              <Wand2 className="size-4" /> {t("ig.analyze")}
-            </Button>
-          </>
-        }
+        <Button onClick={() => setManual(true)}>
+          <Plus className="size-4" /> {t("ig.manual")}
+        </Button>
+        <Button loading={busy === "sync"} onClick={() => run("sync", () => api(`/shops/${shop.id}/instagram/sync`, { method: "POST" }))}>
+          <Download className="size-4" /> {t("ig.sync")}
+        </Button>
+        <Button
+          loading={busy === "scan"}
+          onClick={() =>
+            run("scan", async () => {
+              const r = await api<{ scanned: number }>(`/shops/${shop.id}/instagram/scan`, { method: "POST", json: {} });
+              setNotice(t("ig.scanned").replace("{n}", num(r.scanned, locale)));
+            })
+          }
+        >
+          <ScanText className="size-4" /> {t("ig.scan")}
+        </Button>
+        {counts?.aiAvailable && (
+          <Button
+            variant="primary"
+            loading={busy === "analyze"}
+            onClick={() =>
+              run("analyze", async () => {
+                const r = await api<{ queued: number }>(`/shops/${shop.id}/instagram/analyze`, { method: "POST", json: {} });
+                setNotice(t("ig.aiQueued").replace("{n}", num(r.queued, locale)));
+              })
+            }
+          >
+            <Wand2 className="size-4" /> {t("ig.analyze")}
+          </Button>
+        )}
       </div>
+      <p className="mb-3 text-xs muted">{counts?.aiAvailable ? t("ig.scanHintAi") : t("ig.scanHint")}</p>
       <div className="mb-4">
         <Tabs
-          value={tab}
-          onChange={setTab}
+          value={view}
+          onChange={switchView}
           items={[
-            { value: "analyzed", label: t("ig.product") },
-            { value: "new", label: "new" },
-            { value: "imported", label: t("ig.imported") },
-            { value: "ignored", label: t("ig.ignore") },
+            { value: "products", label: t("ig.viewProducts"), count: counts?.products },
+            { value: "others", label: t("ig.viewOthers"), count: counts?.others },
+            { value: "imported", label: t("ig.imported"), count: counts?.imported },
+            { value: "ignored", label: t("ig.ignore"), count: counts?.ignored },
           ]}
         />
       </div>
       <ErrorNote error={error} />
+      {notice && <p className="mb-3 rounded-xl bg-success/10 px-3 py-2 text-sm text-success">{notice}</p>}
+      {view === "products" && ready.length > 1 && (
+        <div className="mb-3 flex items-center gap-2 text-sm">
+          <button className="text-[var(--accent)]" onClick={() => setPicked(picked.size === ready.length ? new Set() : new Set(ready.map((m) => m.id)))}>
+            {picked.size === ready.length ? t("ig.unselectAll") : t("ig.selectReady").replace("{n}", num(ready.length, locale))}
+          </button>
+        </div>
+      )}
       {!data ? (
         <Spinner />
       ) : data.length === 0 ? (
         <Card>
-          <Empty icon={<Images className="size-6" />} title={t("me.empty")} />
+          <Empty icon={<Images className="size-6" />} title={t(view === "products" ? "ig.emptyProducts" : "me.empty")} />
         </Card>
       ) : (
         <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-4">
           {data.map((m) => {
             const img = m.mediaType === "VIDEO" ? m.thumbnailUrl : m.mediaUrl;
             const x = m.extracted;
+            const canPick = view === "products" && Boolean(x?.price && x.title);
             return (
-              <Card key={m.id} className="flex flex-col gap-2 !p-0 overflow-hidden">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
+              <Card key={m.id} className={clsx("relative flex flex-col gap-2 overflow-hidden !p-0", picked.has(m.id) && "ring-2 ring-[var(--accent)]")}>
+                {canPick && (
+                  <label className="absolute start-2 top-2 z-10 flex size-7 cursor-pointer items-center justify-center rounded-lg bg-black/50 backdrop-blur">
+                    <input type="checkbox" className="size-4 accent-[var(--accent)]" checked={picked.has(m.id)} onChange={() => toggle(m.id)} aria-label={t("ig.pick")} />
+                  </label>
+                )}
                 {img ? <Thumb src={img} className="aspect-square w-full object-cover" loading="lazy" /> : <div className="aspect-square bg-[var(--surface-sunken)]" />}
-                <div className="flex flex-1 flex-col gap-2 p-3">
-                  {x ? (
+                <div className="flex flex-1 flex-col gap-1.5 p-3">
+                  {x && m.status !== "new" ? (
                     <>
-                      <div className="flex items-center gap-1.5">
-                        <Badge tone={x.isProduct ? "success" : "neutral"}>{x.isProduct ? t("ig.product") : t("ig.notProduct")}</Badge>
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <Badge tone={x.source === "ai" ? "info" : "neutral"}>{x.source === "ai" ? t("ig.byAi") : t("ig.byRules")}</Badge>
                         <span className="num text-[11px] muted">
                           {t("ig.confidence")} {num(Math.round(x.confidence * 100), locale)}٪
                         </span>
                       </div>
-                      <p className="truncate text-sm font-semibold strong">{x.title || "—"}</p>
-                      {x.price && <p className="num text-xs muted">{money(x.price, locale)}</p>}
+                      <p className="truncate text-sm font-semibold strong">{x.title || t("ig.noTitle")}</p>
+                      <p className="num text-xs">{x.price ? money(x.price, locale) : <span className="text-warning">{t("ig.noPrice")}</span>}</p>
+                      {(x.variants.length > 0 || x.category) && (
+                        <p className="truncate text-[11px] muted">
+                          {x.category}
+                          {x.category && x.variants.length > 0 && " · "}
+                          {x.variants.length > 0 && t("ig.variants").replace("{n}", num(x.variants.length, locale))}
+                        </p>
+                      )}
                     </>
                   ) : (
-                    <p className="line-clamp-3 text-xs muted">{m.caption || "—"}</p>
+                    <p className="line-clamp-3 text-xs muted">{m.caption || "-"}</p>
                   )}
-                  <div className="mt-auto flex flex-wrap gap-1.5">
+                  <div className="mt-auto flex flex-wrap gap-1.5 pt-1">
                     {m.status !== "imported" && (
-                      <Button size="sm" variant="primary" onClick={() => setImporting(m)}>
-                        {t("ig.import")}
+                      <Button size="sm" variant={view === "products" ? "primary" : "secondary"} onClick={() => setImporting(m)}>
+                        {t(view === "products" ? "ig.import" : "ig.makeProduct")}
                       </Button>
                     )}
                     {m.status !== "ignored" && m.status !== "imported" && (
-                      <Button size="sm" variant="ghost" onClick={() => run(m.id, () => api(`/shops/${shop.id}/instagram/media/${m.id}/ignore`, { method: "POST" }))}>
+                      <Button size="sm" variant="ghost" aria-label={t("ig.ignore")} onClick={() => run(m.id, () => api(`/shops/${shop.id}/instagram/media/${m.id}/ignore`, { method: "POST" }))}>
                         <Trash2 className="size-3.5" />
                       </Button>
                     )}
+                    {m.productId && (
+                      <a href={`/panel/products?edit=${m.productId}`} className="inline-flex items-center gap-1 p-1.5 text-xs text-[var(--accent)]">
+                        {t("ig.openProduct")}
+                      </a>
+                    )}
                     {m.permalink && (
-                      <a href={m.permalink} target="_blank" rel="noreferrer" className="inline-flex items-center p-1.5 muted">
+                      <a href={m.permalink} target="_blank" rel="noreferrer" className="inline-flex items-center p-1.5 muted" aria-label="Instagram">
                         <ExternalLink className="size-3.5" />
                       </a>
                     )}
@@ -161,8 +241,27 @@ function InstagramImport() {
           })}
         </div>
       )}
-      {importing && <ImportModal media={importing} onClose={() => setImporting(null)} onDone={() => (setImporting(null), mutate())} />}
-      {manual && <ManualModal onClose={() => setManual(false)} onDone={() => (setManual(false), setTab("new"), mutate())} />}
+
+      {picked.size > 0 && (
+        <div className="fixed inset-x-3 bottom-20 z-40 mx-auto flex max-w-3xl flex-wrap items-center gap-2 rounded-2xl border border-[var(--border)] bg-[var(--bg-elev)] p-3 shadow-2xl lg:bottom-6">
+          <span className="text-sm font-semibold strong">{t("ig.pickedN").replace("{n}", num(picked.size, locale))}</span>
+          <span className="ms-auto flex flex-wrap items-center gap-2">
+            <Select value={bulkStatus} onChange={(e) => setBulkStatus(e.target.value as "draft" | "active")} className="!w-auto !py-1.5 text-sm" aria-label={t("pr.statusLabel")}>
+              <option value="draft">{t("pr.status.draft")}</option>
+              <option value="active">{t("pr.status.active")}</option>
+            </Select>
+            <label className="flex items-center gap-1 text-xs muted">
+              {t("ig.stockEach")}
+              <Input type="number" min={0} max={10000} value={bulkStock} onChange={(e) => setBulkStock(Math.max(0, Number(e.target.value) || 0))} className="!w-20 !py-1.5 text-sm" />
+            </label>
+            <Button variant="primary" loading={busy === "bulk"} onClick={importPicked}>
+              {t("ig.importPicked")}
+            </Button>
+          </span>
+        </div>
+      )}
+      {importing && <ImportModal media={importing} onClose={() => setImporting(null)} onDone={() => (setImporting(null), refresh())} />}
+      {manual && <ManualModal onClose={() => setManual(false)} onDone={() => (setManual(false), refresh())} />}
     </div>
   );
 }
