@@ -12,6 +12,7 @@
     "db:generate": "pnpm --filter @shopino/db generate",
     "db:migrate": "pnpm --filter @shopino/db migrate",
     "db:seed": "pnpm --filter @shopino/db seed",
+    "demo": "pnpm db:migrate && pnpm db:seed && pnpm --filter @shopino/api demo",
     "infra:up": "docker compose up -d postgres redis",
     "infra:down": "docker compose down"
   },

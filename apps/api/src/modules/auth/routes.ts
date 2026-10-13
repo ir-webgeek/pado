@@ -86,7 +86,9 @@ export const authRoutes =
         .from(shopMembers)
         .innerJoin(shops, eq(shops.id, shopMembers.shopId))
         .leftJoin(shopRoles, eq(shopRoles.id, shopMembers.customRoleId))
-        .where(eq(shopMembers.userId, user.id));
+        .where(eq(shopMembers.userId, user.id))
+        // stable order: the first shop joined opens by default
+        .orderBy(shopMembers.createdAt);
       // effective permissions per shop so the panel shows only what the member can open
       const memberships = rows.map(({ customRole, customPermissions, ...m }) => ({
         ...m,

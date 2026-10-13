@@ -50,7 +50,7 @@ Requirements: Node 22+, pnpm 10, PostgreSQL 16, Redis 7.
 cp .env.example .env            # set JWT_SECRET / COOKIE_SECRET; ANTHROPIC_API_KEY enables the agent
 pnpm install
 pnpm infra:up                   # postgres + redis via docker compose (or use your own)
-pnpm db:migrate && pnpm db:seed # demo shop "atelier-raha", login phone 09120000000
+pnpm demo                       # migrate + seed + full demo data (see below)
 pnpm --filter @shopino/api dev         # http://localhost:4000
 pnpm --filter @shopino/api dev:worker  # background jobs
 pnpm --filter @shopino/web dev         # http://localhost:3000
@@ -60,7 +60,9 @@ In development the OTP code appears on the login screen and in the API log (`OTP
 
 Checks: `pnpm typecheck` and `pnpm test`. The tests cover the slot engine, customer segmentation, automation rule matching, form validation, USD pricing math, knowledge-query building, SSRF guarding, timezone math and phone normalization.
 
-Demo logins after seeding: shop owner and super admin `09120000000` at `/login`. Customer portal `09121111111` at `/me`.
+`pnpm demo` fills every panel section with three months of sample data on top of the base seed (`pnpm db:seed` alone gives a small shop): about 100 orders across statuses and channels, 100 bookings, 16 chats at every inbox stage, AI usage, Instagram posts and comments, stock receipts, expenses, team members with a custom role, campaigns and a second shop for the shop switcher. Pictures are drawn locally, so it works offline. Run it on an empty database; a second run does nothing.
+
+Demo logins: shop owner and super admin `09120000000` at `/login`; team members `09120000001` (staff), `09120000002` (custom role "پاسخگوی دایرکت"), `09120000003` (viewer). Customer portal `09121111111` at `/me`.
 
 Production on a VPS: see [deploy/vps/README.md](deploy/vps/README.md) (Docker + Caddy HTTPS, one command `./deploy.sh`, backups). `deploy/make-package.sh` builds the zip to upload. Cloudflare options: [deploy/CLOUDFLARE.md](deploy/CLOUDFLARE.md).
 
